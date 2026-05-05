@@ -20,7 +20,7 @@ if "theme_mode" not in st.session_state:
 with st.sidebar:
     st.markdown("### ⚙️ VolleyVision Hub")
     st.session_state.theme_mode = st.radio("Modo", ["Noche", "Día"], horizontal=True)
-    st.caption("V3 · análisis táctico avanzado")
+    st.caption("V4 · creado por Marc Riverola Castellà")
 
 DARK = st.session_state.theme_mode == "Noche"
 P = {
@@ -66,6 +66,11 @@ section[data-testid="stSidebar"]{{background:{P['bg2']};border-right:1px solid {
 div[data-baseweb="select"]>div,.stMultiSelect div[data-baseweb="select"]>div{{background:{P['card']};border-color:{P['border']};border-radius:12px;color:{P['text']}}}
 .tactic-title{{text-align:center;font-weight:950;color:{P['muted']};letter-spacing:.08em;margin:1rem 0}}
 footer{{text-align:center;padding:1.4rem;color:{P['muted']};font-size:.72rem;border-top:1px solid {P['border']};margin-top:2rem}}
+.rotation-card{{background:{P['card']};border:1px solid {P['border']};border-radius:18px;padding:1rem;box-shadow:0 10px 28px rgba(0,0,0,.14)}}
+.rotation-title{{font-weight:950;color:{P['text']};margin-bottom:.4rem}}
+.rotation-grid{{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:.7rem}}
+.rotation-cell{{border:1px solid {P['border']};border-radius:12px;padding:.7rem;text-align:center;background:{P['bg2']};font-weight:900}}
+.rotation-badge{{display:inline-block;border-radius:999px;padding:.25rem .65rem;font-weight:950;background:{P['accent1']};color:#111827;margin-top:.35rem}}
 </style>""", unsafe_allow_html=True)
 
 # ──────────────────────────────────────────────────────────────
@@ -117,21 +122,31 @@ def court_svg(zone_data: dict, title="", value_suffix=""):
     return f'''<svg viewBox="0 0 380 255" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:520px"><rect width="380" height="255" rx="18" fill="{P['bg2']}" stroke="{P['border']}"/><line x1="25" y1="96" x2="355" y2="96" stroke="{P['border']}" stroke-dasharray="5 5"/><line x1="25" y1="166" x2="355" y2="166" stroke="{P['border']}" stroke-dasharray="5 5"/>{''.join(cells)}<text x="190" y="244" text-anchor="middle" fill="{P['muted']}" font-size="10">{title}</text></svg>'''
 
 def direction_chart(df, title, value_col="total"):
+    """Campo vertical con flechas estilo scouting: origen y destino por zonas."""
     if df.empty:
         st.info("No hay direcciones detectadas con estos filtros."); return
+    pos = {
+        "Z4": (1, 2.65), "Z3": (2, 2.65), "Z2": (3, 2.65),
+        "Z7": (1, 2.05), "Z8": (2, 2.05), "Z9": (3, 2.05),
+        "Z5": (1, 1.25), "Z6": (2, 1.25), "Z1": (3, 1.25),
+    }
     fig = go.Figure()
-    # fondo de campo
-    for z, (x, y) in ZONE_POS.items():
-        fig.add_shape(type="rect", x0=x-.45, x1=x+.45, y0=y-.35, y1=y+.35, line=dict(color=P["border"]), fillcolor="rgba(148,163,184,0.10)")
-        fig.add_annotation(x=x, y=y, text=z, showarrow=False, font=dict(size=12, color=P["muted"]))
+    fig.add_shape(type="rect", x0=.45, x1=3.55, y0=.65, y1=3.05, line=dict(color="#e7e5e4", width=3), fillcolor="rgba(245,158,11,0.42)")
+    fig.add_shape(type="line", x0=.45, x1=3.55, y0=2.25, y1=2.25, line=dict(color="#e7e5e4", width=2))
+    fig.add_shape(type="line", x0=.45, x1=3.55, y0=1.45, y1=1.45, line=dict(color="#e7e5e4", width=2))
+    fig.add_shape(type="line", x0=2, x1=2, y0=.65, y1=3.05, line=dict(color="#111827", width=2, dash="dash"))
+    for z,(x,y) in pos.items():
+        fig.add_annotation(x=x, y=y, text=z.replace('Z',''), showarrow=False, font=dict(size=14, color=P["text"]))
+    max_n = max(int(df[value_col].max() if value_col in df else df["total"].max()), 1)
     for _, r in df.iterrows():
         o, d = r.get("origen"), r.get("destino")
-        if o not in ZONE_POS or d not in ZONE_POS: continue
-        x0,y0 = ZONE_POS[o]; x1,y1 = ZONE_POS[d]
+        if o not in pos or d not in pos: continue
+        x0,y0 = pos[o]; x1,y1 = pos[d]
         n = int(r.get(value_col, r.get("total", 1)))
-        fig.add_annotation(x=x1, y=y1, ax=x0, ay=y0, xref="x", yref="y", axref="x", ayref="y", showarrow=True, arrowhead=3, arrowsize=1.2, arrowwidth=max(1, min(8, n)), arrowcolor=P["accent1"], text=str(n), font=dict(color=P["text"], size=11), bgcolor="rgba(0,0,0,.35)")
-    fig.update_xaxes(range=[.4,3.6], visible=False); fig.update_yaxes(range=[.45,3.55], visible=False, scaleanchor="x")
-    fig.update_layout(title=title, height=470, paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", margin=dict(t=50,b=20,l=20,r=20))
+        width = max(1.2, min(7, 1 + 6*n/max_n))
+        fig.add_annotation(x=x1, y=y1, ax=x0, ay=y0, xref="x", yref="y", axref="x", ayref="y", showarrow=True, arrowhead=3, arrowsize=1.25, arrowwidth=width, arrowcolor="#111827", text=f"{n}", font=dict(color="white", size=11), bgcolor="rgba(17,24,39,.72)")
+    fig.update_xaxes(range=[.25,3.75], visible=False); fig.update_yaxes(range=[.45,3.25], visible=False, scaleanchor="x")
+    fig.update_layout(title=title, height=560, paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", margin=dict(t=50,b=20,l=20,r=20))
     st.plotly_chart(fig, use_container_width=True)
 
 # ──────────────────────────────────────────────────────────────
@@ -200,15 +215,28 @@ def tabellino(data):
 def set_rotation_summary(data):
     plays = _plays_with_context(data)
     if plays.empty: return
-    rows=[]
-    for setn in sorted(plays["set"].dropna().unique()):
-        sp = plays[plays["set"] == setn]
-        for tc, nm in [("home", data["home_team"]["name"]), ("away", data["away_team"]["name"] )]:
-            first = sp[sp["equipo"] == tc].head(1)
-            rows.append({"Set": setn, "Equipo": nm, "Rotación inicial estimada": first.iloc[0]["rotacion"] if not first.empty else "-"})
-    st.markdown("#### Rotación inicial por set")
-    st.caption("Estimación a partir del marcador/scout. Para exactitud VolleyLab 100% hace falta leer lineups/rotaciones completas del DVW real.")
-    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+    sets = sorted(plays["set"].dropna().unique())
+    sel = st.selectbox("Ver rotaciones del set", sets, format_func=lambda x: f"Set {x}", key=f"rot_set_{id(data)}")
+    sp = plays[plays["set"] == sel]
+    st.markdown("#### Rotaciones por set · saque/recepción")
+    cols = st.columns(2)
+    for i,(tc,nm) in enumerate([("home", data["home_team"]["name"]), ("away", data["away_team"]["name"]) ]):
+        team = sp[sp["equipo"] == tc]
+        first = team.head(1)
+        rot = first.iloc[0]["rotacion"] if not first.empty else "-"
+        first_skill = first.iloc[0]["skill_code"] if not first.empty else ""
+        estado = "Recepción" if first_skill == "R" else ("Saque" if first_skill == "S" else "Sin detectar")
+        players = team[team["dorsal"] != 0].groupby(["dorsal","jugador"]).size().reset_index(name="n").sort_values("n", ascending=False).head(6)
+        labels = []
+        for _,r in players.iterrows():
+            labels.append(f"#{int(r['dorsal'])}<br>{str(r['jugador'])[:11]}")
+        while len(labels)<6: labels.append("-")
+        order = [labels[3], labels[2], labels[1], labels[4], labels[5], labels[0]]
+        html = f'<div class="rotation-card"><div class="rotation-title">{nm}</div><div>Set {sel} · <span class="rotation-badge">{rot}</span> · {estado}</div><div class="rotation-grid">'
+        for lab in order:
+            html += f'<div class="rotation-cell">{lab}</div>'
+        html += '</div><div style="font-size:.72rem;color:%s;margin-top:.5rem">Visual estimado a partir del scout. Cuando el DVW incluya lineup/rotaciones oficiales, se puede hacer exacto.</div></div>' % P['muted']
+        with cols[i]: st.markdown(html, unsafe_allow_html=True)
 
 # ──────────────────────────────────────────────────────────────
 # JUGADORES
@@ -229,21 +257,21 @@ def render_players(data):
     stats = player_score_table(stats)
     hn, an = data["home_team"]["name"], data["away_team"]["name"]
     st.markdown("#### Cápsulas destacadas")
-    cols = st.columns(5)
-    with cols[0]: player_pill("MVP partido", stats.sort_values("MVP Score", ascending=False).head(1))
-    for i, team in enumerate([hn, an], start=1):
-        ts = stats[stats["Equipo"] == team]
-        with cols[i]: player_pill(f"MVP {team}", ts.sort_values("MVP Score", ascending=False).head(1))
-    with cols[3]: player_pill("Máx. anotador", stats.sort_values("Pts", ascending=False).head(1))
-    with cols[4]: player_pill("Máx. bloqueo", stats.sort_values("BLQ K", ascending=False).head(1))
-    c1,c2 = st.columns(2)
-    with c1: player_pill("Mejor recepción", stats[stats["REC Tot"]>0].sort_values(["REC%","REC Tot"], ascending=False).head(1))
-    with c2: player_pill("Mejor saque", stats[stats["SQ Tot"]>0].sort_values(["SQ Ace","SQ Eff%"], ascending=False).head(1))
+    row1 = st.columns(3)
+    with row1[0]: player_pill("MVP partido", stats.sort_values("MVP Score", ascending=False).head(1))
+    with row1[1]: player_pill(f"MVP {hn}", stats[stats["Equipo"] == hn].sort_values("MVP Score", ascending=False).head(1))
+    with row1[2]: player_pill(f"MVP {an}", stats[stats["Equipo"] == an].sort_values("MVP Score", ascending=False).head(1))
+    row2 = st.columns(4)
+    with row2[0]: player_pill("Máx. anotador", stats.sort_values("Pts", ascending=False).head(1))
+    with row2[1]: player_pill("Máx. bloqueo", stats.sort_values("BLQ K", ascending=False).head(1))
+    with row2[2]: player_pill("Mejor recepción", stats[stats["REC Tot"]>0].sort_values(["REC%","REC Tot"], ascending=False).head(1))
+    with row2[3]: player_pill("Mejor saque", stats[stats["SQ Tot"]>0].sort_values(["SQ Ace","SQ Eff%"], ascending=False).head(1))
     st.markdown("---")
-    sort_by = st.selectbox("Ordenar tablas por", ["MVP Score","Pts","Balance","AT Eff%","REC%","SQ Ace","BLQ K"], key="players_sort")
+    st.caption("Tablas totales del partido: todas las acciones de cada jugador, sin filtros.")
+    ordered_cols = ["Equipo","Dorsal","Jugador","Posicion","Pts","Err","Balance","MVP Score","AT K","AT Err","AT Tot","AT Eff%","AT Kill%","SQ Ace","SQ Err","SQ Tot","SQ Eff%","REC Pos","REC Perf","REC Err","REC Tot","REC%","REC Perf%","BLQ K","BLQ Err","DEF Pos","DEF Err","DEF Tot"]
     for team in [hn, an]:
         st.markdown(f"#### {team}")
-        st.dataframe(stats[stats["Equipo"] == team].sort_values(sort_by, ascending=False), use_container_width=True, height=330, hide_index=True)
+        st.dataframe(stats[stats["Equipo"] == team][ordered_cols].sort_values("Pts", ascending=False), use_container_width=True, height=360, hide_index=True)
 
 # ──────────────────────────────────────────────────────────────
 # ATAQUE / SAQUE-RECEPCIÓN / DISTRIBUCIÓN
@@ -258,12 +286,17 @@ def render_attack(data, key="att"):
     with c2:
         zone = st.selectbox("Zona origen", ["Todas"] + sorted([z for z in att["origen"].dropna().unique() if z != "Sin zona"]), key=f"{key}_zone")
     att = _filter_df(_filter_df(att, "jugador", player), "origen", zone)
-    zone_total = att.groupby("origen").size().to_dict()
-    st.markdown(court_svg(zone_total, f"Volumen de ataque · {team_label}"), unsafe_allow_html=True)
+    st.markdown("#### Eficiencia de ataque por zona")
+    zg = att[att["origen"] != "Sin zona"].groupby("origen").agg(total=("skill_code","count"), kills=("es_punto","sum"), errores=("es_error","sum")).reset_index()
+    if not zg.empty:
+        zg["Eff%"] = ((zg["kills"]-zg["errores"])/zg["total"].replace(0,1)*100).round(1)
+    eff_map = dict(zip(zg["origen"], zg["Eff%"].fillna(0).astype(int))) if not zg.empty else {}
+    st.markdown(court_svg(eff_map, f"Eff% ataque · {team_label}", value_suffix="%"), unsafe_allow_html=True)
+    st.dataframe(zg.sort_values("total", ascending=False) if not zg.empty else zg, use_container_width=True, hide_index=True)
     st.markdown("#### Direcciones de ataque")
     dirs = att[(att["origen"]!="Sin zona") & (att["destino"]!="Sin zona")].groupby(["origen","destino"]).agg(total=("skill_code","count"), kills=("es_punto","sum"), errores=("es_error","sum")).reset_index()
     if not dirs.empty: dirs["Eff%"] = ((dirs["kills"]-dirs["errores"])/dirs["total"].replace(0,1)*100).round(1)
-    direction_chart(dirs, "Origen → destino del ataque")
+    direction_chart(dirs, "Direcciones de ataque · origen → destino")
     st.dataframe(dirs.sort_values("total", ascending=False) if not dirs.empty else dirs, use_container_width=True, hide_index=True)
 
 def render_serve_receive(data, key="sr"):
@@ -285,9 +318,16 @@ def render_serve_receive(data, key="sr"):
         if rec.empty: st.info("Sin recepciones"); return
         receptor = st.selectbox("Receptor", ["Todos"] + sorted(rec["jugador"].dropna().unique()), key=f"{key}_rec_player")
         rec = _filter_df(rec, "jugador", receptor)
-        zones = rec.groupby("origen").agg(total=("skill_code","count"), perfectas=("eval_code", lambda x: (x=="#").sum()), errores=("eval_code", lambda x: (x=="=").sum())).reset_index()
-        zones["REC%"] = ((zones["perfectas"] / zones["total"].replace(0,1))*100).round(1)
-        st.markdown(court_svg(dict(zip(zones["origen"], zones["total"])), f"Zonas de recepción · {team_label}"), unsafe_allow_html=True)
+        zones = rec.groupby("origen").agg(total=("skill_code","count"), perfectas=("eval_code", lambda x: (x=="#").sum()), positivas=("eval_code", lambda x: x.isin(["#","+","!"]).sum()), errores=("eval_code", lambda x: (x=="=").sum())).reset_index()
+        zones["REC+%"] = ((zones["positivas"] / zones["total"].replace(0,1))*100).round(1)
+        zones["Perf%"] = ((zones["perfectas"] / zones["total"].replace(0,1))*100).round(1)
+        zones["Eff%"] = (((zones["positivas"]-zones["errores"]) / zones["total"].replace(0,1))*100).round(1)
+        c1,c2,c3,c4 = st.columns(4)
+        with c1: kpi("Recepciones", int(rec.shape[0]))
+        with c2: kpi("Errores", int((rec["eval_code"]=="=").sum()))
+        with c3: kpi("REC+%", f"{round(rec['eval_code'].isin(['#','+','!']).sum()/max(len(rec),1)*100,1)}%")
+        with c4: kpi("Perf%", f"{round((rec['eval_code']=='#').sum()/max(len(rec),1)*100,1)}%")
+        st.markdown(court_svg(dict(zip(zones["origen"], zones["Eff%"].fillna(0).astype(int))), f"Eficiencia recepción · {team_label}", value_suffix="%"), unsafe_allow_html=True)
         st.dataframe(zones.sort_values("total", ascending=False), use_container_width=True, hide_index=True)
         st.markdown("#### Lectura por zona corporal")
         st.caption("El DVW estándar no siempre guarda derecha/izquierda/medio/arriba/abajo. Dejo el módulo preparado: cuando el código del scout lo traiga, se podrá mapear aquí.")
@@ -314,7 +354,20 @@ def render_distribution(data, key="dist"):
     if recq: view = view[view["recepcion_eval"].isin(recq)]
     if recz: view = view[view["recepcion_zona"].isin(recz)]
     attacks = view[view["skill_code"] == "A"].copy()
-    distribution_grid(attacks, f"Distribución colocador · {team_label}")
+    left, right = st.columns([1.35, 1])
+    with left:
+        distribution_grid(attacks, f"Distribución colocador · {team_label}")
+    with right:
+        st.markdown("#### Resumen de distribución")
+        if not attacks.empty:
+            zone_table = attacks.groupby("origen").agg(Balones=("skill_code","count"), Kills=("es_punto","sum"), Errores=("es_error","sum")).reset_index()
+            zone_table["Distribución %"] = (zone_table["Balones"] / max(len(attacks),1) * 100).round(1)
+            zone_table["Eff%"] = ((zone_table["Kills"]-zone_table["Errores"])/zone_table["Balones"].replace(0,1)*100).round(1)
+            st.dataframe(zone_table.sort_values("Balones", ascending=False), use_container_width=True, hide_index=True)
+        else:
+            st.info("Sin colocaciones/ataques con estos filtros.")
+    st.markdown("---")
+    st.markdown("#### Detalle completo")
     if not attacks.empty:
         table = attacks.groupby(["origen","jugador","recepcion_eval","recepcion_zona"]).agg(Balones=("skill_code","count"), Kills=("es_punto","sum"), Errores=("es_error","sum")).reset_index()
         table["Eff%"] = ((table["Kills"]-table["Errores"])/table["Balones"].replace(0,1)*100).round(1)
@@ -340,7 +393,7 @@ def pdf_bytes(data):
     except Exception:
         return None
     buf = BytesIO(); doc = SimpleDocTemplate(buf, pagesize=A4); styles=getSampleStyleSheet(); story=[]
-    story.append(Paragraph("VolleyVision Hub · Resumen", styles["Title"])); story.append(Spacer(1,12))
+    story.append(Paragraph("VolleyVision Hub · Resumen · creado por Marc Riverola Castellà", styles["Title"])); story.append(Spacer(1,12))
     story.append(Paragraph(f"{data['home_team']['name']} vs {data['away_team']['name']}", styles["Heading2"]))
     s=resumen_equipo(data); rows=[["Métrica", data['home_team']['name'], data['away_team']['name']]]
     for label,key in [("Puntos","puntos"),("AT Eff%","att_eff"),("AT Kill%","att_kill_pct"),("REC+%","rec_pos_pct"),("Aces","srv_aces"),("Bloqueos","blk_kills")]: rows.append([label, s['home'].get(key,0), s['away'].get(key,0)])
@@ -424,6 +477,6 @@ def view_dashboard():
 def main():
     if st.session_state.view == "landing" or not st.session_state.matches: view_landing()
     else: view_dashboard()
-    st.markdown('<footer>VolleyVision Hub V3 · análisis táctico avanzado</footer>', unsafe_allow_html=True)
+    st.markdown('<footer>VolleyVision Hub V4 · creado por Marc Riverola Castellà</footer>', unsafe_allow_html=True)
 
 if __name__ == "__main__": main()
