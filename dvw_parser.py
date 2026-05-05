@@ -1,5 +1,5 @@
 """
-dvw_parser.py — VoleiVision Hub
+dvw_parser.py — VolleyVision Hub
 Parser profesional de archivos DataVolley (.dvw)
 Compatible con DataVolley 4, VolleyStation Pro, Click & Scout
 """
