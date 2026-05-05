@@ -240,14 +240,29 @@ class DVWParser:
             if not line:
                 continue
 
-            # Detectar cambio de set
+            # DataVolley guarda el set real también en las columnas posteriores al código.
+            # Las líneas **1set, **2set... marcan el cierre del set anterior; por eso no deben
+            # usarse como inicio del mismo set, sino como cambio al siguiente si no hay metadatos.
+            meta_parts = line.split(";")
+            line_set = None
+            if len(meta_parts) > 8 and str(meta_parts[8]).strip().isdigit():
+                line_set = int(meta_parts[8].strip())
+
+            # Detectar cambio/cierre de set
             set_match = re.match(r'\*\*(\d+)set', line)
             if set_match:
-                current_set = int(set_match.group(1))
+                current_set = line_set if line_set is not None else int(set_match.group(1)) + 1
                 home_score = 0
                 away_score = 0
                 rally = 0
                 continue
+
+            if line_set is not None:
+                if line_set != current_set:
+                    rally = 0
+                    home_score = 0
+                    away_score = 0
+                current_set = line_set
 
             # Detectar marcador
             score_match = re.match(r'[*a]p(\d+):(\d+)', line)
@@ -273,17 +288,30 @@ class DVWParser:
         if len(line) < 6:
             return None
 
+        parts = line.split(";")
+        code_field = parts[0].strip()
+
+        # Metadatos DataVolley posteriores al código: tiempo, set, rotaciones y sextetos.
+        meta_set = int(parts[8]) if len(parts) > 8 and parts[8].strip().isdigit() else set_num
+        rot_home = int(parts[9]) if len(parts) > 9 and parts[9].strip().isdigit() else None
+        rot_away = int(parts[10]) if len(parts) > 10 and parts[10].strip().isdigit() else None
+        lineup_home = [int(x) for x in parts[14:20] if str(x).strip().isdigit()] if len(parts) >= 20 else []
+        lineup_away = [int(x) for x in parts[20:26] if str(x).strip().isdigit()] if len(parts) >= 26 else []
+
         # Equipo
-        if line.startswith("*"):
+        if code_field.startswith("*"):
             team_code = "home"
-            code = line[1:]
-        elif line.startswith("a"):
+            code = code_field[1:]
+        elif code_field.startswith("a"):
             team_code = "away"
-            code = line[1:]
+            code = code_field[1:]
         else:
             return None
 
-        # Ignorar lineas especiales (sustituciones, rotaciones, timeouts, etc)
+        rotation = rot_home if team_code == "home" else rot_away
+        lineup = lineup_home if team_code == "home" else lineup_away
+
+        # Ignorar lineas especiales (sustituciones, rotaciones, timeouts, lineups, etc)
         if code.startswith("P") or code.startswith("z") or code.startswith("c"):
             return None
         if code.startswith("T") or code.startswith("$"):
@@ -296,7 +324,7 @@ class DVWParser:
                         break
                 if eval_char:
                     return {
-                        "set": set_num, "rally": rally,
+                        "set": meta_set, "rally": rally,
                         "home_score": h_score, "away_score": a_score,
                         "equipo": team_code,
                         "dorsal": 0, "jugador": "Equipo",
@@ -311,6 +339,8 @@ class DVWParser:
                         "es_error": eval_char == "=",
                         "num_bloqueadores": "",
                         "posicion": "",
+                        "rot_home": rot_home, "rot_away": rot_away, "rotation": rotation,
+                        "lineup_home": lineup_home, "lineup_away": lineup_away, "lineup": lineup,
                         "raw": line,
                     }
             return None
@@ -362,7 +392,7 @@ class DVWParser:
             num_bloq = bloq_match.group(1)
 
         return {
-            "set": set_num,
+            "set": meta_set,
             "rally": rally,
             "home_score": h_score,
             "away_score": a_score,
@@ -384,6 +414,8 @@ class DVWParser:
             "es_error": eval_char == "=",
             "num_bloqueadores": num_bloq,
             "posicion": posicion,
+            "rot_home": rot_home, "rot_away": rot_away, "rotation": rotation,
+            "lineup_home": lineup_home, "lineup_away": lineup_away, "lineup": lineup,
             "raw": line,
         }
 
