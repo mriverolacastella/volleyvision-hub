@@ -13,50 +13,59 @@ from dvw_parser import DVWParser, stats_por_jugador, resumen_equipo, distribucio
 st.set_page_config(page_title="VoleiVision Hub", page_icon="assets/favicon.ico",
                    layout="wide", initial_sidebar_state="collapsed")
 
-# ─── Paleta ───────────────────────────────────────────────────
+# ─── Tema visual día/noche ─────────────────────────────────────
+if "theme_mode" not in st.session_state:
+    st.session_state.theme_mode = "Noche"
+
+with st.sidebar:
+    st.session_state.theme_mode = st.radio("Modo visual", ["Noche", "Día"], horizontal=True)
+
+DARK = st.session_state.theme_mode == "Noche"
 P = {
-    "bg": "#0f1923", "bg2": "#1a2634", "bg3": "#243447",
-    "card": "#1e2d3d", "border": "#2d4255",
-    "text": "#e8edf2", "muted": "#8899aa", "subtle": "#5a6f82",
-    "accent1": "#00d4aa", "accent2": "#0099ff", "accent3": "#ff6b35",
-    "home": "#00d4aa", "away": "#ff6b35",
-    "kill": "#00d4aa", "error": "#ff4757", "pos": "#2ed573",
-    "white": "#ffffff", "surface": "#f5f7fa",
+    "bg": "#090d14" if DARK else "#f4f7fb",
+    "bg2": "#101722" if DARK else "#ffffff",
+    "bg3": "#171f2c" if DARK else "#e9eef6",
+    "card": "#151b26" if DARK else "#ffffff",
+    "border": "#2b3444" if DARK else "#d8e0ec",
+    "text": "#f4f7fb" if DARK else "#101722",
+    "muted": "#aab3c2" if DARK else "#637083",
+    "subtle": "#717b8d" if DARK else "#8290a3",
+    "accent1": "#f59e0b", "accent2": "#22d3ee", "accent3": "#fb7185",
+    "home": "#22c55e", "away": "#f97316",
+    "kill": "#22c55e", "error": "#ef4444", "pos": "#38bdf8",
+    "white": "#ffffff", "surface": "#090d14" if DARK else "#f4f7fb",
 }
 
-# ─── CSS ──────────────────────────────────────────────────────
 st.markdown(f"""<style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
 html,body,[class*="css"]{{font-family:'Inter',sans-serif}}
-.main{{background:{P['surface']}}}
-.main .block-container{{padding-top:.8rem;max-width:1400px}}
-section[data-testid="stSidebar"]{{display:none}}
-.hero{{text-align:center;padding:3rem 1rem 1.5rem}}
-.hero h1{{font-size:2.8rem;font-weight:800;color:{P['bg']};margin:0}}
+.stApp,.main{{background:{P['surface']};color:{P['text']}}}
+.main .block-container{{padding-top:.8rem;max-width:1480px}}
+section[data-testid="stSidebar"]{{background:{P['bg2']};border-right:1px solid {P['border']}}}
+.hero{{text-align:left;padding:1.4rem 0 1rem}}
+.hero h1{{font-size:2.4rem;font-weight:900;color:{P['text']};margin:0;letter-spacing:-1px}}
 .hero h1 span{{color:{P['accent1']}}}
-.hero p{{color:{P['muted']};font-size:1.1rem;margin-top:.3rem}}
-.score-bar{{background:linear-gradient(135deg,{P['bg']},{P['bg2']});border-radius:14px;padding:1.8rem;color:white;text-align:center;margin-bottom:1.5rem}}
+.hero p{{color:{P['muted']};font-size:1rem;margin-top:.3rem}}
+.pro-card{{background:{P['card']};border:1px solid {P['border']};border-radius:18px;padding:1rem;box-shadow:0 12px 30px rgba(0,0,0,.18)}}
+.score-bar{{background:linear-gradient(135deg,{P['bg2']},{P['bg3']});border:1px solid {P['border']};border-radius:20px;padding:1.7rem;color:{P['text']};text-align:center;margin-bottom:1.4rem;box-shadow:0 14px 30px rgba(0,0,0,.22)}}
 .score-bar .teams{{display:flex;align-items:center;justify-content:center;gap:1.5rem;flex-wrap:wrap}}
-.score-bar .tname{{font-size:1.2rem;font-weight:700;min-width:140px}}
+.score-bar .tname{{font-size:1.15rem;font-weight:800;min-width:150px}}
 .score-bar .tname.home{{color:{P['home']};text-align:right}}
-.score-bar .tname.away{{color:{P['accent3']};text-align:left}}
-.score-bar .result{{font-size:2.6rem;font-weight:900;letter-spacing:.12em;color:white}}
-.score-bar .sets{{color:{P['muted']};font-size:.85rem;margin-top:.4rem}}
-.score-bar .meta{{color:{P['subtle']};font-size:.78rem;margin-bottom:.5rem}}
-.kpi{{background:white;border-radius:10px;padding:.9rem;text-align:center;box-shadow:0 1px 4px rgba(0,0,0,.06);border-top:3px solid {P['accent1']}}}
-.kpi .label{{color:{P['muted']};font-size:.68rem;text-transform:uppercase;letter-spacing:.5px;font-weight:600}}
-.kpi .value{{font-size:1.6rem;font-weight:700;color:{P['bg']};margin:.15rem 0}}
-.kpi .detail{{font-size:.65rem;color:{P['subtle']}}}
-.stTabs [data-baseweb="tab"]{{background:white;border-radius:8px 8px 0 0;padding:8px 16px;font-weight:600;font-size:.82rem;border:1px solid #e2e8f0;border-bottom:none}}
-.stTabs [aria-selected="true"]{{background:{P['bg']} !important;color:{P['accent1']} !important;border-color:{P['bg']} !important}}
-.match-item{{background:white;border-radius:10px;padding:.8rem 1rem;margin-bottom:.5rem;border-left:4px solid {P['accent1']};box-shadow:0 1px 3px rgba(0,0,0,.04)}}
-.match-item:hover{{box-shadow:0 2px 8px rgba(0,0,0,.08)}}
-.match-item .title{{font-weight:600;color:{P['bg']};font-size:.9rem}}
-.match-item .sub{{color:{P['muted']};font-size:.75rem}}
-footer{{text-align:center;padding:1.5rem;color:{P['muted']};font-size:.7rem;border-top:1px solid #e2e8f0;margin-top:2rem}}
-@media(max-width:768px){{.hero h1{{font-size:1.8rem}}.main .block-container{{padding:.5rem .6rem}}}}
+.score-bar .tname.away{{color:{P['away']};text-align:left}}
+.score-bar .result{{font-size:2.8rem;font-weight:900;letter-spacing:.12em;color:{P['text']}}}
+.score-bar .sets,.score-bar .meta{{color:{P['muted']};font-size:.82rem}}
+.kpi{{background:{P['card']};border-radius:16px;padding:1rem;text-align:center;border:1px solid {P['border']};box-shadow:0 10px 24px rgba(0,0,0,.12)}}
+.kpi .label{{color:{P['muted']};font-size:.68rem;text-transform:uppercase;letter-spacing:.7px;font-weight:800}}
+.kpi .value{{font-size:1.7rem;font-weight:900;color:{P['text']};margin:.18rem 0}}
+.kpi .detail{{font-size:.68rem;color:{P['subtle']}}}
+.stTabs [data-baseweb="tab"]{{background:{P['card']};color:{P['muted']};border-radius:12px 12px 0 0;padding:9px 17px;font-weight:800;font-size:.82rem;border:1px solid {P['border']};border-bottom:none}}
+.stTabs [aria-selected="true"]{{background:{P['accent1']} !important;color:#111827 !important;border-color:{P['accent1']} !important}}
+div[data-baseweb="select"]>div, .stMultiSelect div[data-baseweb="select"]>div{{background:{P['card']};border-color:{P['border']};color:{P['text']};border-radius:12px}}
+.stDataFrame{{border-radius:16px;overflow:hidden}}
+.tactic-title{{text-align:center;font-weight:900;letter-spacing:.08em;color:{P['muted']};margin:.8rem 0 1.2rem}}
+footer{{text-align:center;padding:1.5rem;color:{P['muted']};font-size:.72rem;border-top:1px solid {P['border']};margin-top:2rem}}
+@media(max-width:768px){{.hero h1{{font-size:1.8rem}}.main .block-container{{padding:.5rem .7rem}}}}
 </style>""", unsafe_allow_html=True)
-
 
 # ─── State ────────────────────────────────────────────────────
 if "matches" not in st.session_state:
@@ -215,15 +224,196 @@ def view_dashboard():
     render_single_match(data)
 
 
+# ═══════════════════════════════════════════════════════════════
+# TÁCTICA AVANZADA
+# ═══════════════════════════════════════════════════════════════
+
+def _plays_with_context(data: dict) -> pd.DataFrame:
+    """Añade contexto aproximado de rally: fase, recepción previa, colocador previo y rotación estimada."""
+    plays = data.get("plays", pd.DataFrame()).copy()
+    if plays.empty:
+        return plays
+    plays["fase"] = "Total"
+    plays["recepcion_eval"] = "Todas"
+    plays["recepcion_zona"] = "Todas"
+    plays["colocador"] = "Todos"
+    plays["rotacion"] = "Todas"
+    plays["destino"] = plays["zona_fin"].apply(lambda z: f"Z{z}" if str(z).strip() else "Sin zona")
+    plays["origen"] = plays["zona_inicio"].apply(lambda z: f"Z{z}" if str(z).strip() else "Sin zona")
+
+    for (equipo, setn, rally), grp in plays.groupby(["equipo", "set", "rally"], sort=False):
+        idxs = list(grp.index)
+        recs = grp[grp["skill_code"] == "R"]
+        sets = grp[grp["skill_code"] == "E"]
+        rec_eval = recs.iloc[-1]["eval_code"] if not recs.empty else ""
+        rec_zone = recs.iloc[-1]["zona_inicio"] if not recs.empty else ""
+        setter = sets.iloc[-1]["jugador"] if not sets.empty else "Todos"
+        fase = "K1" if not recs.empty else "K2"
+        rot = "Todas"
+        if not grp.empty:
+            hs = int(grp.iloc[0].get("home_score", 0) or 0)
+            as_ = int(grp.iloc[0].get("away_score", 0) or 0)
+            rot_num = ((hs if equipo == "home" else as_) % 6) + 1
+            rot = f"P{rot_num}"
+        plays.loc[idxs, "fase"] = fase
+        plays.loc[idxs, "recepcion_eval"] = rec_eval if rec_eval else "Sin recepción"
+        plays.loc[idxs, "recepcion_zona"] = f"Z{rec_zone}" if str(rec_zone).strip() else "Sin zona"
+        plays.loc[idxs, "colocador"] = setter
+        plays.loc[idxs, "rotacion"] = rot
+    return plays
+
+
+def _filter_df(df, col, value):
+    if value in ("Todos", "Todas", None):
+        return df
+    return df[df[col] == value]
+
+
+def distribution_grid(df: pd.DataFrame, title: str):
+    attacks = df[df["skill_code"] == "A"].copy()
+    total = len(attacks)
+    zones = [("Z4", "ZONA 4"), ("Z3", "ZONA 3"), ("Z2", "ZONA 2"), ("Z5", "ZONA 5"), ("Z6", "PIPE (Z6)"), ("Z1", "ZONA 1")]
+    html = f'<div class="tactic-title">{title}</div><div style="display:grid;grid-template-columns:repeat(3, minmax(150px, 1fr));gap:10px;max-width:760px;margin:auto;">'
+    for z, label in zones:
+        zd = attacks[attacks["origen"] == z]
+        n = len(zd)
+        pct = round(n / total * 100) if total else 0
+        kills = int((zd["eval_code"] == "#").sum()) if n else 0
+        errs = int((zd["eval_code"] == "=").sum()) if n else 0
+        eff = round((kills - errs) / max(n, 1) * 100)
+        active = n > 0
+        bg = P["accent1"] if active else ("#382a18" if DARK else "#fff7e6")
+        txt = "#ffffff" if active and DARK else ("#111827" if active else P["text"])
+        border = P["border"]
+        html += f'''<div style="background:{bg};border:1px solid {border};border-radius:16px;min-height:150px;display:flex;flex-direction:column;align-items:center;justify-content:center;box-shadow:0 10px 24px rgba(0,0,0,.18);">
+            <div style="font-size:.78rem;font-weight:900;letter-spacing:.08em;color:{txt};opacity:.9">{label}</div>
+            <div style="font-size:2.2rem;font-weight:950;color:{txt};margin:.4rem 0;text-shadow:0 2px 8px rgba(0,0,0,.25)">{pct}%</div>
+            <div style="background:rgba(0,0,0,.28);border-radius:999px;padding:.35rem .7rem;font-size:.78rem;font-weight:800;color:{txt}">Nº {n} &nbsp;|&nbsp; <span style="color:#4ade80">Eff {eff}%</span></div>
+        </div>'''
+    html += '</div>'
+    st.markdown(html, unsafe_allow_html=True)
+
+
+def render_team_comparison_bar(data):
+    hn, an = data["home_team"]["name"], data["away_team"]["name"]
+    summary = resumen_equipo(data)
+    h, a = summary["home"], summary["away"]
+    metrics = ["puntos", "att_eff", "att_kill_pct", "rec_pos_pct", "srv_aces", "srv_errors", "blk_kills"]
+    labels = ["Puntos", "AT Eff%", "AT Kill%", "REC+%", "Aces", "Errores saque", "Bloqueos"]
+    fig = go.Figure()
+    fig.add_trace(go.Bar(name=hn, x=labels, y=[h[m] for m in metrics], marker_color=P["home"], text=[h[m] for m in metrics], textposition="outside"))
+    fig.add_trace(go.Bar(name=an, x=labels, y=[a[m] for m in metrics], marker_color=P["away"], text=[a[m] for m in metrics], textposition="outside"))
+    plotly_defaults(fig, 430)
+    fig.update_layout(barmode="group", title="Comparativa principal de equipos", yaxis_title="Valor")
+    st.plotly_chart(fig, use_container_width=True)
+
+
+def render_tactical_module(data, key_prefix="tact"):
+    plays = _plays_with_context(data)
+    if plays.empty:
+        st.info("No hay datos tácticos disponibles.")
+        return
+
+    teams = {data["home_team"]["name"]: "home", data["away_team"]["name"]: "away"}
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        team_label = st.selectbox("Equipo", list(teams.keys()), key=f"{key_prefix}_team")
+    team_code = teams[team_label]
+    df = plays[plays["equipo"] == team_code].copy()
+    with c2:
+        fase = st.selectbox("Fase", ["Total", "K1", "K2"], key=f"{key_prefix}_fase")
+    with c3:
+        rot = st.selectbox("Rotación", ["Todas"] + sorted([x for x in df["rotacion"].dropna().unique() if x != "Todas"]), key=f"{key_prefix}_rot")
+    df = _filter_df(df, "fase", fase if fase != "Total" else "Todos")
+    df = _filter_df(df, "rotacion", rot)
+
+    sub = st.tabs(["Distribución colocador", "Direcciones saque", "Direcciones ataque"])
+
+    with sub[0]:
+        setters = ["Todos"] + sorted([x for x in df["colocador"].dropna().unique() if x and x != "Todos"])
+        recq = ["Todas"] + sorted([x for x in df["recepcion_eval"].dropna().unique() if x])
+        recz = ["Todas"] + sorted([x for x in df["recepcion_zona"].dropna().unique() if x])
+        a,b,c = st.columns(3)
+        with a: setter = st.selectbox("Colocador", setters, key=f"{key_prefix}_setter")
+        with b: rq = st.selectbox("Calidad recepción", recq, key=f"{key_prefix}_rq")
+        with c: rz = st.selectbox("Zona recepción", recz, key=f"{key_prefix}_rz")
+        view = _filter_df(_filter_df(_filter_df(df, "colocador", setter), "recepcion_eval", rq), "recepcion_zona", rz)
+        distribution_grid(view, f"Distribución real | {team_label} | {fase} | Rot: {rot}")
+        at = view[view["skill_code"] == "A"]
+        if not at.empty:
+            table = at.groupby(["origen", "jugador"]).agg(Balones=("skill_code","count"), Kills=("es_punto","sum"), Errores=("es_error","sum")).reset_index()
+            table["Eff%"] = round((table["Kills"] - table["Errores"]) / table["Balones"].replace(0,1) * 100, 1)
+            st.dataframe(table.sort_values(["Balones","Eff%"], ascending=False), use_container_width=True, hide_index=True)
+
+    with sub[1]:
+        srv = df[df["skill_code"] == "S"].copy()
+        players = ["Todos"] + sorted(srv["jugador"].dropna().unique().tolist()) if not srv.empty else ["Todos"]
+        player = st.selectbox("Sacador", players, key=f"{key_prefix}_srv_player")
+        srv = _filter_df(srv, "jugador", player)
+        if srv.empty:
+            st.info("No hay saques con zonas detectadas para estos filtros.")
+        else:
+            dirs = srv.groupby(["origen", "destino", "tipo"]).agg(Saques=("skill_code","count"), Aces=("es_punto","sum"), Errores=("es_error","sum")).reset_index()
+            dirs["Eff%"] = round((dirs["Aces"] - dirs["Errores"]) / dirs["Saques"].replace(0,1) * 100, 1)
+            fig = px.sunburst(dirs, path=["origen", "destino"], values="Saques", color="Eff%", title="Mapa de direcciones de saque")
+            plotly_defaults(fig, 430)
+            st.plotly_chart(fig, use_container_width=True)
+            st.dataframe(dirs.sort_values("Saques", ascending=False), use_container_width=True, hide_index=True)
+
+    with sub[2]:
+        att = df[df["skill_code"] == "A"].copy()
+        players = ["Todos"] + sorted(att["jugador"].dropna().unique().tolist()) if not att.empty else ["Todos"]
+        zones = ["Todas"] + sorted(att["origen"].dropna().unique().tolist()) if not att.empty else ["Todas"]
+        a,b = st.columns(2)
+        with a: player = st.selectbox("Atacante", players, key=f"{key_prefix}_att_player")
+        with b: zone = st.selectbox("Zona de ataque", zones, key=f"{key_prefix}_att_zone")
+        att = _filter_df(_filter_df(att, "jugador", player), "origen", zone)
+        if att.empty:
+            st.info("No hay ataques con zonas detectadas para estos filtros.")
+        else:
+            dirs = att.groupby(["origen", "destino"]).agg(Ataques=("skill_code","count"), Kills=("es_punto","sum"), Errores=("es_error","sum")).reset_index()
+            dirs["Eff%"] = round((dirs["Kills"] - dirs["Errores"]) / dirs["Ataques"].replace(0,1) * 100, 1)
+            fig = px.density_heatmap(dirs, x="destino", y="origen", z="Ataques", text_auto=True, title="Direcciones de ataque")
+            plotly_defaults(fig, 420)
+            st.plotly_chart(fig, use_container_width=True)
+            st.dataframe(dirs.sort_values("Ataques", ascending=False), use_container_width=True, hide_index=True)
+
+
+def build_accumulated_match(matches, team_name=None):
+    plays_list = []
+    for i, m in enumerate(matches):
+        pl = m.get("plays", pd.DataFrame()).copy()
+        if pl.empty:
+            continue
+        hn = m["home_team"]["name"]
+        an = m["away_team"]["name"]
+        if team_name and team_name in (hn, an):
+            selected_code = "home" if hn == team_name else "away"
+            pl["equipo"] = pl["equipo"].apply(lambda x: "home" if x == selected_code else "away")
+        pl["match_id"] = i
+        plays_list.append(pl)
+    plays = pd.concat(plays_list, ignore_index=True) if plays_list else pd.DataFrame()
+    return {
+        "match": {"date": "Acumulado", "league": "Temporada"},
+        "sets": [],
+        "home_team": {"name": team_name or "Equipo acumulado"},
+        "away_team": {"name": "Rivales"},
+        "home_players": pd.DataFrame(),
+        "away_players": pd.DataFrame(),
+        "plays": plays,
+    }
+
 def render_single_match(data):
     score_bar(data)
     hn = data["home_team"]["name"]; an = data["away_team"]["name"]
     summary = resumen_equipo(data)
 
-    tabs = st.tabs(["Resumen", "Jugadores", "Ataque", "Saque y Recepcion", "Por Set"])
+    tabs = st.tabs(["Resumen", "Jugadores", "Ataque", "Saque y Recepción", "Táctica Avanzada", "Por Set"])
 
     # ── RESUMEN ──
     with tabs[0]:
+        render_team_comparison_bar(data)
+        st.markdown("---")
         for tc, nm in [("home", hn), ("away", an)]:
             s = summary[tc]
             color = P["home"] if tc == "home" else P["away"]
@@ -344,8 +534,12 @@ def render_single_match(data):
         rec_df = stats[stats["REC Tot"] > 0][rec_cols].sort_values("REC%", ascending=False)
         st.dataframe(rec_df, use_container_width=True, hide_index=True)
 
-    # ── POR SET ──
+    # ── TÁCTICA AVANZADA ──
     with tabs[4]:
+        render_tactical_module(data, key_prefix=f"single_{st.session_state.active_match}")
+
+    # ── POR SET ──
+    with tabs[5]:
         plays = data["plays"]
         if plays.empty:
             return
@@ -458,6 +652,11 @@ def render_multi_match(matches):
 
         sf = st.selectbox("Ordenar", ["Pts","Pts/P","AT Eff%","REC%","SQ Ace","BLQ K"], key="acum_sort")
         st.dataframe(grouped.sort_values(sf, ascending=False), use_container_width=True, height=400, hide_index=True)
+
+    st.markdown("---")
+    st.markdown("### Táctica avanzada acumulada")
+    st.caption("Mismos filtros del partido individual, pero acumulando todos los partidos cargados del equipo seleccionado.")
+    render_tactical_module(build_accumulated_match(matches, team_sel), key_prefix=f"acc_{team_sel}")
 
     # Excel export
     st.markdown("---")
