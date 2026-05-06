@@ -1,587 +1,355 @@
+"""VolleyVision Hub · DataVolley parser and analysis helpers.
+Robust enough for standard DVW 4 files: teams, rosters, lineups, rotations, skills, zones and phases.
 """
-dvw_parser.py — VolleyVision Hub
-Parser profesional de archivos DataVolley (.dvw)
-Compatible con DataVolley 4, VolleyStation Pro, Click & Scout
-"""
-
+from __future__ import annotations
 import re
+from dataclasses import dataclass
+from typing import Dict, List, Tuple, Optional, Any
 import pandas as pd
-from typing import Dict, List, Optional, Tuple
 
-# ─── Mapeos ───────────────────────────────────────────────────
+SKILL_MAP = {"S":"Saque", "R":"Recepción", "E":"Colocación", "A":"Ataque", "B":"Bloqueo", "D":"Defensa", "F":"Freeball"}
+EVALS = ["#", "+", "!", "-", "/", "="]
+EVAL_SCORE = {"#":4,"+":3,"!":2,"-":1,"/":0,"=":-1}
+SERVE_TYPE = {"Q":"Salto potencia", "T":"Salto flotante", "N":"Saque suelo", "H":"Flotante", "M":"Mixto", "U":"Otros", "O":"Otros"}
+ATTACK_TYPE = {"Q":"Rápida", "T":"Tensa", "H":"Alta", "M":"Media", "U":"Shoot", "N":"Slide", "O":"Otros"}
+POSITION_MAP = {"1":"Líbero", "2":"Opuesto", "3":"Central", "4":"Receptor", "5":"Colocador", "6":"Universal"}
 
-SKILL_MAP = {"S": "Saque", "R": "Recepcion", "E": "Colocacion",
-             "A": "Ataque", "B": "Bloqueo", "D": "Defensa", "F": "Freeball"}
 
-EVAL_MAP = {"#": "Punto", "+": "Positivo", "!": "Exclamacion",
-            "-": "Negativo", "/": "Slash", "=": "Error"}
+def _clean(v: Any) -> str:
+    return str(v or "").strip().replace("\\x", "")
 
-EVAL_SCORE = {"#": 4, "+": 3, "!": 2, "/": 1, "-": 0, "=": -1}
 
-SKILL_TYPE_MAP = {
-    "Q": "Rapido", "T": "Tenso", "H": "Alto", "M": "Medio",
-    "U": "Shoot set", "N": "Slide", "O": "Otros",
-}
+def _safe_int(x: Any, default: int = 0) -> int:
+    try:
+        s = str(x).strip()
+        if s in ("", "*", "None"):
+            return default
+        return int(float(s))
+    except Exception:
+        return default
 
-POSITION_MAP = {"1": "Libero", "2": "Opuesto", "3": "Central",
-                "4": "Receptor", "5": "Colocador", "6": "Universal"}
+
+def pct(num: float, den: float) -> float:
+    return round(float(num) / float(den) * 100, 1) if den else 0.0
 
 
 class DVWParser:
-    """Parser completo de archivos .dvw"""
-
     def __init__(self, content: str):
         self.raw = content.replace("\r\n", "\n").replace("\r", "\n")
         self.lines = self.raw.split("\n")
         self.sections: Dict[str, List[str]] = {}
         self._split_sections()
 
-    def parse(self) -> dict:
-        match_info = self._parse_match()
-        sets_info = self._parse_sets()
-        home_team, away_team = self._parse_teams()
-        home_players = self._parse_players("3PLAYERS-H")
-        away_players = self._parse_players("3PLAYERS-V")
-        attack_combos = self._parse_attack_combinations()
-        plays = self._parse_scout(home_players, away_players)
-
-        return {
-            "match": match_info,
-            "sets": sets_info,
-            "home_team": home_team,
-            "away_team": away_team,
-            "home_players": pd.DataFrame(home_players) if home_players else pd.DataFrame(),
-            "away_players": pd.DataFrame(away_players) if away_players else pd.DataFrame(),
-            "attack_combos": attack_combos,
-            "plays": pd.DataFrame(plays) if plays else pd.DataFrame(),
-        }
-
-    # ─── Secciones ────────────────────────────────────────────
-
     def _split_sections(self):
-        current = None
+        cur = None
         for line in self.lines:
             line = line.strip()
             if line.startswith("[3") and line.endswith("]"):
-                current = line[1:-1]
-                self.sections[current] = []
-            elif current is not None:
-                self.sections.setdefault(current, []).append(line)
+                cur = line[1:-1]
+                self.sections[cur] = []
+            elif cur is not None:
+                self.sections[cur].append(line)
 
-    def _get_section(self, key: str) -> List[str]:
-        return self.sections.get(key, [])
+    def sec(self, name: str) -> List[str]:
+        return self.sections.get(name, [])
 
-    # ─── Match ────────────────────────────────────────────────
+    def parse(self) -> dict:
+        home_team, away_team = self._parse_teams()
+        home_players = self._parse_players("3PLAYERS-H", home_team["name"], "home")
+        away_players = self._parse_players("3PLAYERS-V", away_team["name"], "away")
+        players = pd.DataFrame(home_players + away_players)
+        combos = self._parse_attack_combinations()
+        plays, lineups = self._parse_scout(home_players, away_players, combos)
+        sets = self._parse_sets(plays)
+        return {
+            "match": self._parse_match(),
+            "sets": sets,
+            "home_team": home_team,
+            "away_team": away_team,
+            "home_players": pd.DataFrame(home_players),
+            "away_players": pd.DataFrame(away_players),
+            "players": players,
+            "attack_combos": combos,
+            "lineups": lineups,
+            "plays": plays,
+            "validation": self._validate(plays, lineups, sets),
+        }
 
     def _parse_match(self) -> dict:
-        lines = self._get_section("3MATCH")
-        info = {"date": "", "time": "", "season": "", "league": "", "phase": "", "match_number": ""}
-        for line in lines:
+        info = {"date":"", "time":"", "season":"", "league":"", "phase":"", "match_number":""}
+        for line in self.sec("3MATCH"):
             parts = line.split(";")
-            if len(parts) >= 5 and parts[0].strip():
-                info["date"] = parts[0].strip()
-                info["time"] = parts[1].strip() if len(parts) > 1 else ""
-                info["season"] = parts[2].strip() if len(parts) > 2 else ""
-                info["league"] = parts[3].strip() if len(parts) > 3 else ""
-                info["match_number"] = parts[8].strip() if len(parts) > 8 else ""
+            if len(parts) > 8 and parts[0].strip():
+                info.update({
+                    "date": parts[0].strip(), "time": parts[1].strip(), "season": parts[2].strip(),
+                    "league": parts[3].strip(), "phase": parts[4].strip(), "match_number": parts[7].strip() if len(parts)>7 else "",
+                })
                 break
         return info
 
-    # ─── Sets ─────────────────────────────────────────────────
-
-    def _parse_sets(self) -> List[dict]:
-        lines = self._get_section("3SET")
-        sets = []
-        for line in lines:
-            if not line.strip() or not line.startswith("True") and not line.startswith("False"):
-                continue
-            parts = line.split(";")
-            if len(parts) < 5:
-                continue
-            played = parts[0].strip() == "True"
-            if not played:
-                continue
-            # Scores are in format "25-23" or " 8- 7" with spaces
-            scores_raw = [p.strip() for p in parts[1:5]]
-            # Find the final score (last non-empty score pair that looks like a score)
-            partial_scores = []
-            for s in scores_raw:
-                match = re.match(r'(\d+)\s*-\s*(\d+)', s)
-                if match:
-                    partial_scores.append((int(match.group(1)), int(match.group(2))))
-
-            if partial_scores:
-                final = partial_scores[-1]
-                duration = parts[5].strip() if len(parts) > 5 else ""
-                sets.append({
-                    "set": len(sets) + 1,
-                    "home_score": final[0],
-                    "away_score": final[1],
-                    "duration": duration,
-                    "partial_scores": partial_scores,
-                })
-        return sets
-
-    # ─── Teams ────────────────────────────────────────────────
-
     def _parse_teams(self) -> Tuple[dict, dict]:
-        lines = self._get_section("3TEAMS")
-        home = {"id": "", "name": "Local", "coach": "", "assistant": ""}
-        away = {"id": "", "name": "Visitante", "coach": "", "assistant": ""}
-        team_lines = [l for l in lines if ";" in l and l.strip()]
-        if len(team_lines) >= 1:
-            p = team_lines[0].split(";")
-            home["id"] = p[0].strip()
-            home["name"] = p[1].strip() if len(p) > 1 else "Local"
-            home["coach"] = p[3].strip() if len(p) > 3 else ""
-            home["assistant"] = p[4].strip() if len(p) > 4 else ""
-        if len(team_lines) >= 2:
-            p = team_lines[1].split(";")
-            away["id"] = p[0].strip()
-            away["name"] = p[1].strip() if len(p) > 1 else "Visitante"
-            away["coach"] = p[3].strip() if len(p) > 3 else ""
-            away["assistant"] = p[4].strip() if len(p) > 4 else ""
-        return home, away
+        teams = []
+        for line in self.sec("3TEAMS"):
+            if ";" not in line: continue
+            p = line.split(";")
+            if len(p) >= 2 and p[1].strip():
+                teams.append({"id":p[0].strip(), "name":p[1].strip(), "coach":p[3].strip() if len(p)>3 else ""})
+        while len(teams) < 2:
+            teams.append({"id":"", "name":"Local" if not teams else "Visitante", "coach":""})
+        return teams[0], teams[1]
 
-    # ─── Players ──────────────────────────────────────────────
-
-    def _parse_players(self, section_key: str) -> List[dict]:
-        lines = self._get_section(section_key)
-        players = []
-        for line in lines:
-            if not line.strip() or ";" not in line:
-                continue
-            parts = line.split(";")
-            if len(parts) < 11:
-                continue
-            try:
-                shirt = int(parts[1].strip())
-            except (ValueError, IndexError):
-                continue
-
-            player_idx = parts[2].strip()
-            fed_id = parts[8].strip() if len(parts) > 8 else ""
-            surname = parts[9].strip() if len(parts) > 9 else ""
-            firstname = parts[10].strip() if len(parts) > 10 else ""
-
-            # Detectar libero y posicion
-            is_libero = False
-            position = ""
-            for i in range(11, min(len(parts), 16)):
-                val = parts[i].strip()
-                if val == "L":
-                    is_libero = True
-                if val in POSITION_MAP:
-                    position = POSITION_MAP[val]
-                if val in ("True", "False"):
-                    break
-
-            # Rotaciones (campos 3-6)
+    def _parse_players(self, section: str, team_name: str, team_code: str) -> List[dict]:
+        out = []
+        for line in self.sec(section):
+            if ";" not in line: continue
+            p = line.split(";")
+            if len(p) < 11: continue
+            dorsal = _safe_int(p[1], -1)
+            if dorsal < 0: continue
+            surname = p[9].strip() if len(p)>9 else ""
+            firstname = p[10].strip() if len(p)>10 else ""
+            full = f"{surname}, {firstname}" if firstname else surname or f"#{dorsal}"
+            short = f"{surname} {firstname[:1]}." if firstname else surname or f"#{dorsal}"
+            is_libero = False; position = ""
+            for val in p[11:18]:
+                val = val.strip()
+                if val == "L": is_libero = True
+                if val in POSITION_MAP: position = POSITION_MAP[val]
             rotations = []
-            for i in range(3, min(7, len(parts))):
-                r = parts[i].strip()
-                if r and r != "*" and r.isdigit():
-                    rotations.append(int(r))
-
-            full_name = f"{surname}, {firstname}" if firstname else surname
-
-            players.append({
-                "dorsal": shirt,
-                "indice": player_idx,
-                "fed_id": fed_id,
-                "apellido": surname,
-                "nombre": firstname,
-                "nombre_completo": full_name,
-                "nombre_corto": f"{surname} {firstname[0]}." if firstname else surname,
-                "posicion": position,
-                "es_libero": is_libero,
-                "titular": len(rotations) > 0,
-                "rotaciones": rotations,
+            for val in p[3:7]:
+                if val.strip().isdigit(): rotations.append(int(val.strip()))
+            out.append({
+                "team_code": team_code, "Equipo": team_name, "dorsal": dorsal, "Dorsal": dorsal,
+                "Jugador": full, "jugador_corto": short, "Posición": position or ("Líbero" if is_libero else ""),
+                "es_libero": is_libero, "rotaciones_base": rotations
             })
-
-        return players
-
-    # ─── Attack Combinations ──────────────────────────────────
+        return out
 
     def _parse_attack_combinations(self) -> dict:
-        lines = self._get_section("3ATTACKCOMBINATION")
         combos = {}
-        for line in lines:
-            if ";" not in line:
-                continue
-            parts = line.split(";")
-            if len(parts) >= 5:
-                code = parts[0].strip()
-                description = parts[4].strip() if len(parts) > 4 else parts[3].strip()
-                combos[code] = {
-                    "code": code,
-                    "target_zone": parts[1].strip(),
-                    "description": description,
-                }
+        for line in self.sec("3ATTACKCOMBINATION"):
+            p = line.split(";")
+            if len(p) >= 5 and p[0].strip():
+                combos[p[0].strip()] = {"code":p[0].strip(), "target_zone":p[1].strip(), "type":p[3].strip(), "description":p[4].strip()}
         return combos
 
-    # ─── Scout (Play-by-Play) ─────────────────────────────────
+    def _score_sets_from_3set(self):
+        sets = []
+        for line in self.sec("3SET"):
+            p = line.split(";")
+            if not p or p[0].strip() != "True": continue
+            scores = []
+            for token in p[1:5]:
+                m = re.search(r"(\d+)\s*-\s*(\d+)", token)
+                if m: scores.append((int(m.group(1)), int(m.group(2))))
+            if scores:
+                h,a = scores[-1]
+                sets.append({"set": len(sets)+1, "home_score":h, "away_score":a, "duration":p[5].strip() if len(p)>5 else ""})
+        return sets
 
-    def _parse_scout(self, home_players: List[dict], away_players: List[dict]) -> List[dict]:
-        lines = self._get_section("3SCOUT")
+    def _parse_sets(self, plays: pd.DataFrame) -> List[dict]:
+        sets = self._score_sets_from_3set()
+        if sets:
+            return sets
+        if plays.empty: return []
+        out = []
+        for s, g in plays.groupby("set"):
+            out.append({"set": int(s), "home_score": int(g["home_score"].max()), "away_score": int(g["away_score"].max()), "duration":""})
+        return out
 
-        # Crear lookups por dorsal
-        home_lookup = {p["dorsal"]: p for p in home_players}
-        away_lookup = {p["dorsal"]: p for p in away_players}
+    def _players_lookup(self, home_players, away_players):
+        look = {"home":{}, "away":{}}
+        for p in home_players: look["home"][p["dorsal"]] = p
+        for p in away_players: look["away"][p["dorsal"]] = p
+        return look
 
-        plays = []
-        current_set = 1
-        home_score = 0
-        away_score = 0
-        rally = 0
+    def _extract_lineup(self, parts: List[str]) -> Tuple[List[int], List[int]]:
+        vals = [_safe_int(x, -999) for x in parts[14:]]
+        vals = [v for v in vals if v != -999]
+        if len(vals) >= 12:
+            return vals[:6], vals[6:12]
+        return [], []
 
-        for line in lines:
-            line = line.strip()
-            if not line:
+    def _parse_scout(self, home_players, away_players, combos) -> Tuple[pd.DataFrame, Dict[int, Dict[str, List[int]]]]:
+        lookup = self._players_lookup(home_players, away_players)
+        rows = []
+        current_set = 1; rally = 0; home_score = 0; away_score = 0; serve_team = ""
+        lineups: Dict[int, Dict[str, List[int]]] = {}
+        last_rec: Dict[str, Any] = {}
+        last_set: Dict[str, Any] = {}
+
+        for raw in self.sec("3SCOUT"):
+            raw = raw.strip()
+            if not raw: continue
+            if raw.startswith("**"):
+                m = re.search(r"\*\*(\d+)set", raw)
+                if m:
+                    current_set = int(m.group(1)); rally = 0; home_score = 0; away_score = 0; serve_team = ""
                 continue
-
-            # DataVolley guarda el set real también en las columnas posteriores al código.
-            # Las líneas **1set, **2set... marcan el cierre del set anterior; por eso no deben
-            # usarse como inicio del mismo set, sino como cambio al siguiente si no hay metadatos.
-            meta_parts = line.split(";")
-            line_set = None
-            if len(meta_parts) > 8 and str(meta_parts[8]).strip().isdigit():
-                line_set = int(meta_parts[8].strip())
-
-            # Detectar cambio/cierre de set
-            set_match = re.match(r'\*\*(\d+)set', line)
-            if set_match:
-                current_set = line_set if line_set is not None else int(set_match.group(1)) + 1
-                home_score = 0
-                away_score = 0
-                rally = 0
+            if not (raw.startswith("*") or raw.startswith("a")):
                 continue
+            parts = raw.split(";")
+            code_full = parts[0]
+            prefix = code_full[0]
+            team = "home" if prefix == "*" else "away"
+            code = code_full[1:]
 
-            if line_set is not None:
-                if line_set != current_set:
-                    rally = 0
-                    home_score = 0
-                    away_score = 0
-                current_set = line_set
+            # Set/rotation/lineup metadata from DVW columns when present
+            meta_set = _safe_int(parts[8], current_set) if len(parts)>8 else current_set
+            if meta_set > 0: current_set = meta_set
+            home_rot = _safe_int(parts[9], 0) if len(parts)>9 else 0
+            away_rot = _safe_int(parts[10], 0) if len(parts)>10 else 0
+            home_lu, away_lu = self._extract_lineup(parts)
+            if home_lu and away_lu and current_set not in lineups:
+                lineups[current_set] = {"home": home_lu, "away": away_lu, "home_rotation": home_rot, "away_rotation": away_rot}
 
-            # Detectar marcador
-            score_match = re.match(r'[*a]p(\d+):(\d+)', line)
-            if score_match:
-                home_score = int(score_match.group(1))
-                away_score = int(score_match.group(2))
-                rally += 1
+            # Score lines
+            sm = re.match(r"p(\d+):(\d+)", code)
+            if sm:
+                home_score = int(sm.group(1)); away_score = int(sm.group(2)); rally += 1; serve_team = ""
                 continue
+            if code.startswith(("P", "z", "T")) or code.startswith("$$"):
+                continue
+            if len(code) < 5: continue
+            try: dorsal = int(code[:2])
+            except Exception: continue
+            skill_code = code[2]
+            if skill_code not in SKILL_MAP: continue
+            type_code = code[3] if len(code)>3 else ""
+            eval_code = code[4] if len(code)>4 else ""
+            if eval_code not in EVALS: eval_code = ""
+            skill = SKILL_MAP[skill_code]
+            if skill_code == "S": serve_team = team; rally += 1 if rally == 0 else 0
+            phase = "K1" if serve_team and team != serve_team else "K2"
+            if skill_code == "R": phase = "K1"
+            if skill_code == "S": phase = "K2"
+            player = lookup.get(team, {}).get(dorsal, {})
+            jugador = player.get("Jugador", f"#{dorsal}")
+            pos = player.get("Posición", "")
+            combo = ""; combo_desc = ""
+            if skill_code in ("A", "E"):
+                after = code[5:]
+                cm = re.match(r"([A-Z0-9]{2})", after)
+                if cm:
+                    c = cm.group(1)
+                    if c in combos:
+                        combo = c; combo_desc = combos[c].get("description", "")
+            zm = re.search(r"~(\d)(\d)", code)
+            zstart = zm.group(1) if zm else ""
+            zend = zm.group(2) if zm else ""
+            bm = re.search(r"[HTA-Z](\d)(?:[A-Z])?$", code.replace("~", ""))
+            blockers = bm.group(1) if bm else ""
+            row = {
+                "raw": raw, "set": current_set, "rally": rally, "home_score": home_score, "away_score": away_score,
+                "team_code": team, "equipo": team, "Equipo": "", "dorsal": dorsal, "Dorsal": dorsal, "Jugador": jugador, "Posición": pos,
+                "skill_code": skill_code, "skill": skill, "tipo_code": type_code,
+                "tipo": SERVE_TYPE.get(type_code, ATTACK_TYPE.get(type_code, type_code)),
+                "eval_code": eval_code, "eval_score": EVAL_SCORE.get(eval_code, 0), "phase": phase,
+                "home_rotation": home_rot, "away_rotation": away_rot, "rotation": home_rot if team == "home" else away_rot,
+                "rotation_label": f"P{home_rot if team == 'home' else away_rot}" if (home_rot if team == 'home' else away_rot) else "",
+                "serve_team": serve_team, "zona_inicio": zstart, "zona_fin": zend,
+                "origen": f"Z{zstart}" if zstart else "Sin zona", "destino": f"Z{zend}" if zend else "Sin zona",
+                "combo": combo, "combo_desc": combo_desc, "num_bloqueadores": blockers,
+                "es_punto": eval_code == "#", "es_error": eval_code == "=",
+                "team_score": home_score if team == "home" else away_score,
+                "opp_score": away_score if team == "home" else home_score,
+            }
+            if skill_code == "R":
+                last_rec[team] = row
+            if skill_code == "E":
+                last_set[team] = row
+                # reception context
+                rec = last_rec.get(team, {})
+                row["rec_eval"] = rec.get("eval_code", "")
+                row["rec_zone"] = rec.get("destino", "")
+            if skill_code == "A":
+                rec = last_rec.get(team, {})
+                setr = last_set.get(team, {})
+                row["rec_eval"] = rec.get("eval_code", "")
+                row["rec_zone"] = rec.get("destino", "")
+                row["setter"] = setr.get("Jugador", "")
+                row["set_combo"] = setr.get("combo", "")
+            rows.append(row)
 
-            # Parsear jugada
-            play = self._parse_play(line, current_set, rally, home_score, away_score,
-                                     home_lookup, away_lookup)
-            if play:
-                plays.append(play)
+        df = pd.DataFrame(rows)
+        if not df.empty:
+            for c in ["home_rotation", "away_rotation", "rotation", "home_score", "away_score", "team_score", "opp_score", "set", "rally"]:
+                df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0).astype(int)
+        return df, lineups
 
-        return plays
-
-    def _parse_play(self, line: str, set_num: int, rally: int,
-                     h_score: int, a_score: int,
-                     home_lookup: dict, away_lookup: dict) -> Optional[dict]:
-        """Parsea una linea de scout DVW."""
-
-        if len(line) < 6:
-            return None
-
-        parts = line.split(";")
-        code_field = parts[0].strip()
-
-        # Metadatos DataVolley posteriores al código: tiempo, set, rotaciones y sextetos.
-        meta_set = int(parts[8]) if len(parts) > 8 and parts[8].strip().isdigit() else set_num
-        rot_home = int(parts[9]) if len(parts) > 9 and parts[9].strip().isdigit() else None
-        rot_away = int(parts[10]) if len(parts) > 10 and parts[10].strip().isdigit() else None
-        lineup_home = [int(x) for x in parts[14:20] if str(x).strip().isdigit()] if len(parts) >= 20 else []
-        lineup_away = [int(x) for x in parts[20:26] if str(x).strip().isdigit()] if len(parts) >= 26 else []
-
-        # Equipo
-        if code_field.startswith("*"):
-            team_code = "home"
-            code = code_field[1:]
-        elif code_field.startswith("a"):
-            team_code = "away"
-            code = code_field[1:]
-        else:
-            return None
-
-        rotation = rot_home if team_code == "home" else rot_away
-        lineup = lineup_home if team_code == "home" else lineup_away
-
-        # Ignorar lineas especiales (sustituciones, rotaciones, timeouts, lineups, etc)
-        if code.startswith("P") or code.startswith("z") or code.startswith("c"):
-            return None
-        if code.startswith("T") or code.startswith("$"):
-            # Punto de equipo ($$&H# o $$&H=)
-            if code.startswith("$$"):
-                eval_char = ""
-                for ch in code:
-                    if ch in EVAL_MAP:
-                        eval_char = ch
-                        break
-                if eval_char:
-                    return {
-                        "set": meta_set, "rally": rally,
-                        "home_score": h_score, "away_score": a_score,
-                        "equipo": team_code,
-                        "dorsal": 0, "jugador": "Equipo",
-                        "skill": "Punto equipo", "skill_code": "$",
-                        "tipo": "", "tipo_code": "",
-                        "evaluacion": EVAL_MAP.get(eval_char, ""),
-                        "eval_code": eval_char,
-                        "eval_score": EVAL_SCORE.get(eval_char, 0),
-                        "combo": "", "combo_desc": "",
-                        "zona_inicio": "", "zona_fin": "",
-                        "es_punto": eval_char == "#",
-                        "es_error": eval_char == "=",
-                        "num_bloqueadores": "",
-                        "posicion": "",
-                        "rot_home": rot_home, "rot_away": rot_away, "rotation": rotation,
-                        "lineup_home": lineup_home, "lineup_away": lineup_away, "lineup": lineup,
-                        "raw": line,
-                    }
-            return None
-
-        # Dorsal (2 digitos)
-        try:
-            dorsal = int(code[:2])
-        except ValueError:
-            return None
-
-        # Buscar jugador
-        lookup = home_lookup if team_code == "home" else away_lookup
-        player = lookup.get(dorsal, {})
-        jugador = player.get("nombre_corto", f"#{dorsal}")
-        posicion = player.get("posicion", "")
-
-        # Skill + tipo (posiciones 2 y 3)
-        skill_code = code[2] if len(code) > 2 else ""
-        tipo_code = code[3] if len(code) > 3 else ""
-
-        if skill_code not in SKILL_MAP:
-            return None
-
-        skill = SKILL_MAP.get(skill_code, skill_code)
-        tipo = SKILL_TYPE_MAP.get(tipo_code, tipo_code)
-
-        # Evaluacion (posicion 4)
-        eval_char = code[4] if len(code) > 4 else ""
-        evaluacion = EVAL_MAP.get(eval_char, eval_char)
-        eval_score = EVAL_SCORE.get(eval_char, 0)
-
-        # Combinacion de ataque (posiciones 5-6)
-        combo = code[5:7].strip("~") if len(code) > 6 else ""
-
-        # Zonas (buscar en el resto del codigo)
-        zona_inicio = ""
-        zona_fin = ""
-        rest = code[5:] if len(code) > 5 else ""
-        # Las zonas estan despues de ~ tipicamente en formato ~ZiZf
-        zone_match = re.search(r'~(\d)(\d)', rest)
-        if zone_match:
-            zona_inicio = zone_match.group(1)
-            zona_fin = zone_match.group(2)
-
-        # Numero de bloqueadores (buscar patron como H2, T1, etc despues de las zonas)
-        num_bloq = ""
-        bloq_match = re.search(r'[A-Z](\d)[A-Z]?$', code.split(";")[0] if ";" in code else code)
-        if bloq_match:
-            num_bloq = bloq_match.group(1)
-
-        return {
-            "set": meta_set,
-            "rally": rally,
-            "home_score": h_score,
-            "away_score": a_score,
-            "equipo": team_code,
-            "dorsal": dorsal,
-            "jugador": jugador,
-            "skill": skill,
-            "skill_code": skill_code,
-            "tipo": tipo,
-            "tipo_code": tipo_code,
-            "evaluacion": evaluacion,
-            "eval_code": eval_char,
-            "eval_score": eval_score,
-            "combo": combo,
-            "combo_desc": "",
-            "zona_inicio": zona_inicio,
-            "zona_fin": zona_fin,
-            "es_punto": eval_char == "#",
-            "es_error": eval_char == "=",
-            "num_bloqueadores": num_bloq,
-            "posicion": posicion,
-            "rot_home": rot_home, "rot_away": rot_away, "rotation": rotation,
-            "lineup_home": lineup_home, "lineup_away": lineup_away, "lineup": lineup,
-            "raw": line,
-        }
+    def _validate(self, plays: pd.DataFrame, lineups: dict, sets: list) -> dict:
+        if plays.empty:
+            return {"ok": False, "issues": ["No se han detectado acciones de scouting."]}
+        issues = []
+        for c, label in [("zona_inicio", "zonas de origen"), ("zona_fin", "zonas de destino")]:
+            if c in plays and (plays[c].astype(str) != "").sum() == 0: issues.append(f"No hay {label} codificadas.")
+        if not lineups: issues.append("No se han detectado formaciones/lineups.")
+        if not sets: issues.append("No se han detectado sets.")
+        return {"ok": len(issues)==0, "issues": issues, "actions": int(len(plays)), "sets": len(sets), "lineup_sets": len(lineups)}
 
 
-# ═══════════════════════════════════════════════════════════════
-# FUNCIONES DE ANALISIS
-# ═══════════════════════════════════════════════════════════════
+def attach_team_names(data: dict) -> dict:
+    plays = data["plays"].copy()
+    if not plays.empty:
+        h = data["home_team"]["name"]; a = data["away_team"]["name"]
+        plays["Equipo"] = plays["team_code"].map({"home": h, "away": a})
+        plays["Rival"] = plays["team_code"].map({"home": a, "away": h})
+    data["plays"] = plays
+    return data
 
-def stats_por_jugador(data: dict) -> pd.DataFrame:
-    """Estadisticas completas por jugador."""
+
+def filter_plays(plays: pd.DataFrame, team_name: str="Todos", phase: str="Total", rotation: str="Todas", desde_punto: int=0, player: str="Todos", skill: Optional[str]=None) -> pd.DataFrame:
+    df = plays.copy()
+    if skill: df = df[df["skill_code"] == skill]
+    if team_name != "Todos": df = df[df["Equipo"] == team_name]
+    if phase != "Total": df = df[df["phase"] == phase]
+    if rotation != "Todas":
+        r = int(str(rotation).replace("P", ""))
+        df = df[df["rotation"] == r]
+    if desde_punto:
+        df = df[df["team_score"] >= int(desde_punto)]
+    if player != "Todos": df = df[df["Jugador"] == player]
+    return df
+
+
+def skill_summary(df: pd.DataFrame, skill_code: str, group_cols: List[str]) -> pd.DataFrame:
+    d = df[df["skill_code"] == skill_code].copy()
+    for gc in group_cols:
+        if gc not in d.columns:
+            d[gc] = ""
+    if d.empty:
+        return pd.DataFrame(columns=group_cols + ["Total", "#", "+", "!", "-", "/", "=", "#+!%", "#%", "Eff%"])
+    for ev in EVALS:
+        d[ev] = (d["eval_code"] == ev).astype(int)
+    g = d.groupby(group_cols, dropna=False).agg(Total=("skill_code", "count"), **{ev:(ev,"sum") for ev in EVALS}).reset_index()
+    g["#+!%"] = ((g["#"] + g["+"] + g["!"]) / g["Total"].replace(0, pd.NA) * 100).fillna(0).round(1)
+    g["#%"] = (g["#"] / g["Total"].replace(0, pd.NA) * 100).fillna(0).round(1)
+    g["Eff%"] = ((g["#"] - g["="]) / g["Total"].replace(0, pd.NA) * 100).fillna(0).round(1)
+    return g
+
+
+def player_report(data: dict) -> pd.DataFrame:
     plays = data["plays"]
-    if plays.empty:
-        return pd.DataFrame()
-
+    if plays.empty: return pd.DataFrame()
     rows = []
-    for team_code in ["home", "away"]:
-        team_plays = plays[plays["equipo"] == team_code]
-        team_name = data["home_team"]["name"] if team_code == "home" else data["away_team"]["name"]
-        players_df = data["home_players"] if team_code == "home" else data["away_players"]
-
-        for dorsal in team_plays["dorsal"].unique():
-            if dorsal == 0:
-                continue
-            pp = team_plays[team_plays["dorsal"] == dorsal]
-
-            # Info del jugador
-            pinfo = players_df[players_df["dorsal"] == dorsal] if not players_df.empty else pd.DataFrame()
-            nombre = pinfo.iloc[0]["nombre_completo"] if not pinfo.empty else f"#{dorsal}"
-            posicion = pinfo.iloc[0]["posicion"] if not pinfo.empty and "posicion" in pinfo.columns else ""
-
-            # Ataque
-            att = pp[pp["skill_code"] == "A"]
-            att_total = len(att)
-            att_kill = len(att[att["eval_code"] == "#"])
-            att_err = len(att[att["eval_code"] == "="])
-            att_blk = len(att[att["eval_code"].isin(["/", "-"])])
-            att_eff = round((att_kill - att_err) / att_total * 100, 1) if att_total > 0 else 0.0
-            att_kill_pct = round(att_kill / att_total * 100, 1) if att_total > 0 else 0.0
-
-            # Saque
-            srv = pp[pp["skill_code"] == "S"]
-            srv_total = len(srv)
-            srv_ace = len(srv[srv["eval_code"] == "#"])
-            srv_err = len(srv[srv["eval_code"] == "="])
-            srv_eff = round((srv_ace - srv_err) / srv_total * 100, 1) if srv_total > 0 else 0.0
-
-            # Recepcion
-            rec = pp[pp["skill_code"] == "R"]
-            rec_total = len(rec)
-            rec_pos = len(rec[rec["eval_code"].isin(["#", "+", "!"])])
-            rec_perf = len(rec[rec["eval_code"] == "#"])
-            rec_err = len(rec[rec["eval_code"] == "="])
-            rec_pct = round(rec_pos / rec_total * 100, 1) if rec_total > 0 else 0.0
-            rec_perf_pct = round(rec_perf / rec_total * 100, 1) if rec_total > 0 else 0.0
-
-            # Bloqueo
-            blk = pp[pp["skill_code"] == "B"]
-            blk_kill = len(blk[blk["eval_code"] == "#"])
-            blk_err = len(blk[blk["eval_code"] == "="])
-
-            # Defensa
-            dig = pp[pp["skill_code"] == "D"]
-            dig_total = len(dig)
-            dig_pos = len(dig[dig["eval_code"].isin(["#", "+", "!"])])
-            dig_err = len(dig[dig["eval_code"] == "="])
-
-            # Totales
-            pts_total = att_kill + srv_ace + blk_kill
-            err_total = att_err + srv_err + rec_err + blk_err
-
-            rows.append({
-                "Equipo": team_name, "Dorsal": dorsal, "Jugador": nombre,
-                "Posicion": posicion,
-                "Pts": pts_total, "Err": err_total, "Balance": pts_total - err_total,
-                # Ataque
-                "AT K": att_kill, "AT Err": att_err, "AT Tot": att_total,
-                "AT Eff%": att_eff, "AT Kill%": att_kill_pct,
-                # Saque
-                "SQ Ace": srv_ace, "SQ Err": srv_err, "SQ Tot": srv_total,
-                "SQ Eff%": srv_eff,
-                # Recepcion
-                "REC Pos": rec_pos, "REC Perf": rec_perf, "REC Err": rec_err,
-                "REC Tot": rec_total, "REC%": rec_pct, "REC Perf%": rec_perf_pct,
-                # Bloqueo
-                "BLQ K": blk_kill, "BLQ Err": blk_err,
-                # Defensa
-                "DEF Pos": dig_pos, "DEF Err": dig_err, "DEF Tot": dig_total,
-            })
-
-    return pd.DataFrame(rows).sort_values("Pts", ascending=False)
+    rosters = pd.concat([data["home_players"], data["away_players"]], ignore_index=True)
+    for _, p in rosters.iterrows():
+        pp = plays[(plays["Equipo"] == p["Equipo"]) & (plays["dorsal"] == p["dorsal"])]
+        def cnt(sk, ev=None):
+            x = pp[pp["skill_code"] == sk]
+            return int((x["eval_code"] == ev).sum()) if ev else int(len(x))
+        at_t=cnt("A"); at_k=cnt("A","#"); at_e=cnt("A","="); at_b=int((pp[(pp.skill_code=="A")]["eval_code"].isin(["/","-"])).sum()) if not pp.empty else 0
+        sq_t=cnt("S"); sq_a=cnt("S","#"); sq_e=cnt("S","=")
+        rec_t=cnt("R"); rec_h=cnt("R","#"); rec_p=cnt("R","+"); rec_m=cnt("R","!"); rec_e=cnt("R","=")
+        blq_t=cnt("B"); blq_k=cnt("B","#"); blq_e=cnt("B","=")
+        pts=at_k+sq_a+blq_k; err=at_e+sq_e+rec_e+blq_e
+        rows.append({"Equipo":p["Equipo"], "#":p["Dorsal"], "Jugador":p["Jugador"], "Posición":p.get("Posición",""),
+                     "PTS":pts, "W-L":pts-err, "SQ Tot":sq_t, "SQ #":sq_a, "SQ =":sq_e,
+                     "REC Tot":rec_t, "REC #":rec_h, "REC +":rec_p, "REC !":rec_m, "REC =":rec_e, "REC #+!%":pct(rec_h+rec_p+rec_m, rec_t), "REC #%":pct(rec_h, rec_t),
+                     "AT Tot":at_t, "AT #":at_k, "AT =":at_e, "AT /-":at_b, "AT Eff%":pct(at_k-at_e, at_t), "AT #%":pct(at_k, at_t),
+                     "BLQ Tot":blq_t, "BLQ #":blq_k, "BLQ =":blq_e})
+    return pd.DataFrame(rows)
 
 
-def resumen_equipo(data: dict) -> dict:
-    """KPIs de resumen por equipo."""
-    plays = data["plays"]
-    if plays.empty:
-        return {"home": {}, "away": {}}
-
-    result = {}
-    for team_code in ["home", "away"]:
-        tp = plays[(plays["equipo"] == team_code) & (plays["dorsal"] != 0)]
-
-        att = tp[tp["skill_code"] == "A"]
-        srv = tp[tp["skill_code"] == "S"]
-        rec = tp[tp["skill_code"] == "R"]
-        blk = tp[tp["skill_code"] == "B"]
-
-        att_k = len(att[att["eval_code"] == "#"])
-        att_e = len(att[att["eval_code"] == "="])
-        att_t = len(att)
-        srv_a = len(srv[srv["eval_code"] == "#"])
-        srv_e = len(srv[srv["eval_code"] == "="])
-        rec_t = len(rec)
-        rec_p = len(rec[rec["eval_code"].isin(["#", "+", "!"])])
-        rec_pf = len(rec[rec["eval_code"] == "#"])
-        blk_k = len(blk[blk["eval_code"] == "#"])
-
-        result[team_code] = {
-            "puntos": att_k + srv_a + blk_k,
-            "att_kills": att_k, "att_errors": att_e, "att_total": att_t,
-            "att_eff": round((att_k - att_e) / max(att_t, 1) * 100, 1),
-            "att_kill_pct": round(att_k / max(att_t, 1) * 100, 1),
-            "srv_aces": srv_a, "srv_errors": srv_e, "srv_total": len(srv),
-            "rec_pos_pct": round(rec_p / max(rec_t, 1) * 100, 1),
-            "rec_perf_pct": round(rec_pf / max(rec_t, 1) * 100, 1),
-            "rec_errors": len(rec[rec["eval_code"] == "="]),
-            "blk_kills": blk_k,
-        }
-
-    return result
-
-
-def distribucion_ataque(data: dict) -> pd.DataFrame:
-    """Distribucion de ataques por zona de inicio."""
-    plays = data["plays"]
-    if plays.empty:
-        return pd.DataFrame()
-    att = plays[(plays["skill_code"] == "A") & (plays["zona_inicio"] != "")].copy()
-    if att.empty:
-        return pd.DataFrame()
-    att["zona"] = "Z" + att["zona_inicio"]
-    grouped = att.groupby(["equipo", "zona"]).agg(
-        total=("skill_code", "count"),
-        kills=("es_punto", "sum"),
-        errores=("es_error", "sum"),
-    ).reset_index()
-    grouped["eff"] = round((grouped["kills"] - grouped["errores"]) / grouped["total"].replace(0, 1) * 100, 1)
-    grouped["kill_pct"] = round(grouped["kills"] / grouped["total"].replace(0, 1) * 100, 1)
-    return grouped
-
-
-def mapa_ataque_destino(data: dict) -> pd.DataFrame:
-    """Mapa de ataques: zona inicio -> zona destino."""
-    plays = data["plays"]
-    if plays.empty:
-        return pd.DataFrame()
-    att = plays[(plays["skill_code"] == "A") &
-                (plays["zona_inicio"] != "") &
-                (plays["zona_fin"] != "")].copy()
-    if att.empty:
-        return pd.DataFrame()
-    att["desde"] = "Z" + att["zona_inicio"]
-    att["hacia"] = "Z" + att["zona_fin"]
-    grouped = att.groupby(["equipo", "desde", "hacia"]).agg(
-        total=("skill_code", "count"),
-        kills=("es_punto", "sum"),
-        errores=("es_error", "sum"),
-    ).reset_index()
-    return grouped
+def team_names(data: dict) -> List[str]:
+    return [data["home_team"]["name"], data["away_team"]["name"]]
