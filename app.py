@@ -166,11 +166,12 @@ ZONE_POS = {
     "Sin zona": (1.5, -0.25)
 }
 ORDER_ZONES = ["Z4","Z3","Z2","Z7","Z8","Z9","Z5","Z6","Z1"]
-LEFT_POS = {z:(x,y) for z,(x,y) in ZONE_POS.items()}
-RIGHT_POS = {"Z4": (5.5, 2.5), "Z3": (4.5, 2.5), "Z2": (3.5, 2.5),
-             "Z7": (5.5, 1.5), "Z8": (4.5, 1.5), "Z9": (3.5, 1.5),
-             "Z5": (5.5, 0.5), "Z6": (4.5, 0.5), "Z1": (3.5, 0.5),
-             "Sin zona": (4.5, -0.25)}
+BOTTOM_POS = {z:(x,y) for z,(x,y) in ZONE_POS.items()}
+# Mitad superior rotada 180º para que ambas pistas queden confrontadas con la red en medio
+TOP_POS = {"Z2": (0.5, 3.5), "Z3": (1.5, 3.5), "Z4": (2.5, 3.5),
+           "Z9": (0.5, 4.5), "Z8": (1.5, 4.5), "Z7": (2.5, 4.5),
+           "Z1": (0.5, 5.5), "Z6": (1.5, 5.5), "Z5": (2.5, 5.5),
+           "Sin zona": (1.5, 6.25)}
 
 def court_heat(zone_df: pd.DataFrame, value_col="Eff%", count_col="Total", title="", show_empty=True):
     fig = go.Figure()
@@ -197,29 +198,34 @@ def court_heat(zone_df: pd.DataFrame, value_col="Eff%", count_col="Total", title
 
 def direction_court(df: pd.DataFrame, title="Direcciones", empty_msg="Selecciona un jugador para ver direcciones"):
     fig = go.Figure()
-    fig.update_layout(height=430, margin=dict(l=10,r=10,t=45,b=10), paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", title=dict(text=title, font=dict(color="#f4f7fb", size=16)), xaxis=dict(visible=False, range=[0,6]), yaxis=dict(visible=False, range=[0,3]), showlegend=False)
-    # two real halves + net
-    for pos_map in (LEFT_POS, RIGHT_POS):
-        for z in ORDER_ZONES:
-            x,y = pos_map[z]
-            fig.add_shape(type="rect", x0=x-.48, x1=x+.48, y0=y-.48, y1=y+.48, line=dict(color="#dbe4ef", width=1), fillcolor="rgba(241,245,249,.06)", layer="below")
-            fig.add_annotation(x=x,y=y,text=f"<b>{z}</b>",showarrow=False,font=dict(color="#cbd5e1", size=12))
-    fig.add_shape(type="line", x0=3, x1=3, y0=0, y1=3, line=dict(color="#ffffff", width=3))
-    fig.add_annotation(x=1.5, y=3.08, text="Origen", showarrow=False, font=dict(color="#9fb0c6", size=12))
-    fig.add_annotation(x=4.5, y=3.08, text="Destino", showarrow=False, font=dict(color="#9fb0c6", size=12))
+    fig.update_layout(height=520, margin=dict(l=10,r=10,t=45,b=10), paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", title=dict(text=title, font=dict(color="#f4f7fb", size=16)), xaxis=dict(visible=False, range=[0,3]), yaxis=dict(visible=False, range=[0,6]), showlegend=False)
+    # Pista inferior (origen)
+    for z in ORDER_ZONES:
+        x,y = BOTTOM_POS[z]
+        fig.add_shape(type="rect", x0=x-.48, x1=x+.48, y0=y-.48, y1=y+.48, line=dict(color="#dbe4ef", width=1), fillcolor="rgba(241,245,249,.06)", layer="below")
+        fig.add_annotation(x=x,y=y,text=f"<b>{z}</b>",showarrow=False,font=dict(color="#cbd5e1", size=12))
+    # Pista superior (destino), confrontada con la inferior
+    for z in ORDER_ZONES:
+        x,y = TOP_POS[z]
+        fig.add_shape(type="rect", x0=x-.48, x1=x+.48, y0=y-.48, y1=y+.48, line=dict(color="#dbe4ef", width=1), fillcolor="rgba(241,245,249,.06)", layer="below")
+        fig.add_annotation(x=x,y=y,text=f"<b>{z}</b>",showarrow=False,font=dict(color="#cbd5e1", size=12))
+    # Red horizontal en el medio
+    fig.add_shape(type="line", x0=0, x1=3, y0=3, y1=3, line=dict(color="#ffffff", width=4))
+    fig.add_annotation(x=1.5, y=0.05, text="Origen", showarrow=False, font=dict(color="#9fb0c6", size=12))
+    fig.add_annotation(x=1.5, y=5.95, text="Destino", showarrow=False, font=dict(color="#9fb0c6", size=12))
     if df is None or df.empty:
-        fig.add_annotation(x=3,y=1.5,text=empty_msg,showarrow=False,font=dict(color="#f59e0b", size=14), bgcolor="rgba(7,16,24,.75)", bordercolor="#2a3b50", borderpad=10)
+        fig.add_annotation(x=1.5,y=3,text=empty_msg,showarrow=False,font=dict(color="#f59e0b", size=14), bgcolor="rgba(7,16,24,.75)", bordercolor="#2a3b50", borderpad=10)
         return fig
     max_total = max(1, int(df["Total"].max())) if "Total" in df else 1
     for _, r in df.iterrows():
         o, d = str(r.get("origen","")), str(r.get("destino",""))
-        if o not in LEFT_POS or d not in RIGHT_POS or o == "Sin zona" or d == "Sin zona":
+        if o not in BOTTOM_POS or d not in TOP_POS or o == "Sin zona" or d == "Sin zona":
             continue
-        x0,y0 = LEFT_POS[o]; x1,y1 = RIGHT_POS[d]
+        x0,y0 = BOTTOM_POS[o]; x1,y1 = TOP_POS[d]
         total = int(r.get("Total",1)); width = 1.5 + 5 * total / max_total
         eff = float(r.get("Eff%",0)) if r.get("Eff%",0) != "" else 0
         color = "#22c55e" if eff >= 30 else ("#ef4444" if eff < 0 else "#f59e0b")
-        fig.add_annotation(x=x1,y=y1,ax=x0,ay=y0,xref="x",yref="y",axref="x",ayref="y",showarrow=True,arrowhead=3,arrowsize=1.1,arrowwidth=width,arrowcolor=color,opacity=.88,text="")
+        fig.add_annotation(x=x1,y=y1,ax=x0,ay=y0,xref="x",yref="y",axref="x",ayref="y",showarrow=True,arrowhead=3,arrowsize=1.15,arrowwidth=width,arrowcolor=color,opacity=.9,text="")
         mx,my=(x0+x1)/2,(y0+y1)/2
         fig.add_annotation(x=mx,y=my,text=str(total),showarrow=False,font=dict(color="#fff",size=11),bgcolor="rgba(0,0,0,.58)",borderpad=3)
     return fig
