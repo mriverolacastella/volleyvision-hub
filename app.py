@@ -116,8 +116,8 @@ def format_table_labels(df: pd.DataFrame) -> pd.DataFrame:
         "BLQ K": "BLQ #", "BLQ Err": "BLQ =",
         "DEF Pos": "DEF #+!", "DEF Err": "DEF =",
         "perfectas": "#", "positivas": "#+!", "errores": "=",
-        "Kills": "#", "Errores": "=", "aces": "#", "Aces": "#",
-        "errores_saque": "=", "Err": "Errores",
+        "Kills": "#", "Errores": "=", "errores": "=", "errors": "=", "aces": "#", "Aces": "#",
+        "errores_saque": "=", "Err": "=", "Error": "=",
         "Perf%": "#%", "REC+%": "#+!%", "Eff%": "Eff%",
         "eval_code": "Eval.", "recepcion_eval": "Recepción", "recepcion_zona": "Zona recepción",
         "origen": "Origen", "destino": "Destino", "jugador": "Jugador", "total": "Total",
@@ -197,59 +197,78 @@ def _dv_zone_xy(zone: str, side: str = "target", skill: str = "A"):
     return x_map.get(z, 2.0), (y_source if side == "source" else y_target).get(z, 1.0 if side == "source" else 5.8)
 
 
-def direction_chart(df, title, value_col="total", skill="A"):
-    """Campo completo con flechas limpias: origen propio → destino rival.
-    Agrupa líneas iguales y muestra grosor proporcional, evitando el cruce caótico del gráfico anterior.
-    """
-    if df.empty:
-        st.info("No hay direcciones detectadas con estos filtros.")
-        return
-    view = df.copy()
-    view = view[view["origen"].astype(str).str.startswith("Z") & view["destino"].astype(str).str.startswith("Z")]
-    if view.empty:
-        st.info("El archivo no trae origen/destino suficientes para dibujar flechas.")
-        return
-    # reducimos a las 18 trayectorias más usadas para que se entienda visualmente
-    view = view.sort_values(value_col if value_col in view.columns else "total", ascending=False).head(18)
+def _base_direction_court(title: str, skill: str = "A"):
+    """Crea un campo claro, proporcional y vacío. Las flechas se añaden después."""
     fig = go.Figure()
-    court_fill = "rgba(245,158,11,0.34)" if DARK else "rgba(245,158,11,0.30)"
-    line_col = "rgba(255,255,255,.75)" if DARK else "rgba(31,41,55,.45)"
-    # campo rival y propio
+    court_fill = "rgba(255,255,255,0.02)" if DARK else "rgba(255,255,255,0.90)"
+    attack_fill = "rgba(245,158,11,0.16)" if DARK else "rgba(245,158,11,0.10)"
+    line_col = "rgba(255,255,255,.72)" if DARK else "rgba(31,41,55,.55)"
+
+    # Campo rival y campo propio. Se dibuja limpio aunque todavía no haya selección.
     fig.add_shape(type="rect", x0=.45, x1=3.55, y0=4.1, y1=6.35, line=dict(color=line_col, width=2), fillcolor=court_fill)
     fig.add_shape(type="rect", x0=.45, x1=3.55, y0=.65, y1=2.9, line=dict(color=line_col, width=2), fillcolor=court_fill)
-    fig.add_shape(type="line", x0=.35, x1=3.65, y0=3.5, y1=3.5, line=dict(color="#f8fafc" if DARK else "#111827", width=4))
+    fig.add_shape(type="line", x0=.35, x1=3.65, y0=3.5, y1=3.5, line=dict(color=P["accent1"], width=5))
     for y in [4.85, 5.6, 1.4, 2.15]:
-        fig.add_shape(type="line", x0=.45, x1=3.55, y0=y, y1=y, line=dict(color=line_col, width=1.5, dash="dot"))
-    # etiquetas de zonas
+        fig.add_shape(type="line", x0=.45, x1=3.55, y0=y, y1=y, line=dict(color=line_col, width=1.2, dash="dot"))
+    # zona de 3m
+    fig.add_shape(type="rect", x0=.45, x1=3.55, y0=4.1, y1=4.85, line=dict(color="rgba(0,0,0,0)"), fillcolor=attack_fill)
+    fig.add_shape(type="rect", x0=.45, x1=3.55, y0=2.15, y1=2.9, line=dict(color="rgba(0,0,0,0)"), fillcolor=attack_fill)
+
+    fig.add_annotation(x=2, y=6.52, text="CAMPO RIVAL / DESTINO", showarrow=False, font=dict(size=12, color=P["muted"]))
+    fig.add_annotation(x=2, y=.45, text="MI CAMPO / ORIGEN", showarrow=False, font=dict(size=12, color=P["muted"]))
+
     for z in ["Z4","Z3","Z2","Z7","Z8","Z9","Z5","Z6","Z1"]:
-        xt,yt = _dv_zone_xy(z, "target", skill)
-        xs,ys = _dv_zone_xy(z, "source", "A")
+        xt, yt = _dv_zone_xy(z, "target", skill)
+        xs, ys = _dv_zone_xy(z, "source", "A")
         fig.add_annotation(x=xt, y=yt, text=z, showarrow=False, font=dict(size=12, color=P["text"]))
         fig.add_annotation(x=xs, y=ys, text=z, showarrow=False, font=dict(size=12, color=P["text"]))
     if skill == "S":
         for z in ["Z5","Z7","Z6","Z9","Z1"]:
-            xs,ys = _dv_zone_xy(z, "source", "S")
-            fig.add_annotation(x=xs, y=ys, text=z, showarrow=False, font=dict(size=11, color=P["muted"]))
+            xs, ys = _dv_zone_xy(z, "source", "S")
+            fig.add_annotation(x=xs, y=ys, text=f"S{z[-1]}", showarrow=False, font=dict(size=11, color=P["accent1"]))
+
+    fig.update_xaxes(range=[.2, 3.8], visible=False)
+    fig.update_yaxes(range=[.15, 6.7], visible=False, scaleanchor="x")
+    fig.update_layout(title=title, height=680, paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", margin=dict(t=55,b=10,l=10,r=10))
+    return fig
+
+
+def direction_chart(df, title, value_col="total", skill="A", empty_message: str = "Selecciona un jugador para ver sus direcciones."):
+    """Campo completo con flechas limpias: origen propio → destino rival.
+    Si no hay selección, muestra el campo en blanco para evitar gráficos confusos.
+    """
+    fig = _base_direction_court(title, skill=skill)
+    if df is None or df.empty:
+        fig.add_annotation(x=2, y=3.5, text=empty_message, showarrow=False, font=dict(size=14, color=P["muted"]), bgcolor="rgba(15,23,42,.45)", borderpad=8)
+        st.plotly_chart(fig, use_container_width=True)
+        return
+
+    view = df.copy()
+    view = view[view["origen"].astype(str).str.startswith("Z") & view["destino"].astype(str).str.startswith("Z")]
+    if view.empty:
+        fig.add_annotation(x=2, y=3.5, text="El archivo no trae origen/destino suficientes para dibujar flechas.", showarrow=False, font=dict(size=14, color=P["muted"]), bgcolor="rgba(15,23,42,.45)", borderpad=8)
+        st.plotly_chart(fig, use_container_width=True)
+        return
+
+    view = view.sort_values(value_col if value_col in view.columns else "total", ascending=False).head(14)
     max_n = max(int(view[value_col].max() if value_col in view else view["total"].max()), 1)
     palette = {"#":"#22c55e", "+":"#84cc16", "!":"#f59e0b", "-":"#fb923c", "/":"#f97316", "=":"#ef4444"}
     for _, r in view.iterrows():
         o, d = r.get("origen"), r.get("destino")
-        x0,y0 = _dv_zone_xy(o, "source", skill)
-        x1,y1 = _dv_zone_xy(d, "target", skill)
+        x0, y0 = _dv_zone_xy(o, "source", skill)
+        x1, y1 = _dv_zone_xy(d, "target", skill)
         n = int(r.get(value_col, r.get("total", 1)))
-        width = max(1.4, min(6.5, 1.2 + 5.3*n/max_n))
+        width = max(1.4, min(7.0, 1.2 + 5.8*n/max_n))
         color = "#111827" if not DARK else "#f8fafc"
         if "eval_code" in r:
             color = palette.get(r.get("eval_code"), color)
         fig.add_annotation(
             x=x1, y=y1, ax=x0, ay=y0, xref="x", yref="y", axref="x", ayref="y",
-            showarrow=True, arrowhead=3, arrowsize=1.2, arrowwidth=width,
-            arrowcolor=color, text=f"{n}", font=dict(color="#fff", size=10), bgcolor="rgba(15,23,42,.72)", borderpad=2
+            showarrow=True, arrowhead=3, arrowsize=1.15, arrowwidth=width,
+            arrowcolor=color, text=f"{n}", font=dict(color="#fff", size=10), bgcolor="rgba(15,23,42,.78)", borderpad=2
         )
-    fig.update_xaxes(range=[.2,3.8], visible=False)
-    fig.update_yaxes(range=[.15,6.55], visible=False, scaleanchor="x")
-    fig.update_layout(title=title, height=680, paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", margin=dict(t=55,b=10,l=10,r=10))
     st.plotly_chart(fig, use_container_width=True)
+
 # ──────────────────────────────────────────────────────────────
 # CONTEXTO TÁCTICO APROXIMADO
 # ──────────────────────────────────────────────────────────────
@@ -359,7 +378,7 @@ def filtered_context(data, key, team_default=None):
 def horizontal_mirror_comparison(data):
     hn, an = data["home_team"]["name"], data["away_team"]["name"]
     s = resumen_equipo(data); h, a = s.get("home",{}), s.get("away",{})
-    metrics = [("Puntos","puntos"),("Ataque Eff%","att_eff"),("Ataque Kill%","att_kill_pct"),("Recepción #+!%","rec_pos_pct"),("Aces","srv_aces"),("Errores saque","srv_errors"),("Bloqueos","blk_kills")]
+    metrics = [("Puntos","puntos"),("Ataque Eff%","att_eff"),("Ataque Kill%","att_kill_pct"),("Recepción #+!%","rec_pos_pct"),("Aces","srv_aces"),("Saque =","srv_errors"),("Bloqueos","blk_kills")]
     labels = [m[0] for m in metrics]; hv = [h.get(m[1],0) for m in metrics]; av = [-a.get(m[1],0) for m in metrics]
     fig = go.Figure()
     fig.add_trace(go.Bar(y=labels, x=av, orientation="h", name=an, marker_color=P["away"], text=[abs(x) for x in av], textposition="outside"))
@@ -482,58 +501,88 @@ def render_players(data):
 def render_attack(data, key="att"):
     df, team_label = filtered_context(data, key)
     att = df[df["skill_code"] == "A"].copy()
-    if att.empty: st.info("No hay ataques con estos filtros."); return
-    c1,c2 = st.columns(2)
+    if att.empty:
+        st.info("No hay ataques con estos filtros.")
+        direction_chart(pd.DataFrame(), "Direcciones de ataque · campo limpio", skill="A")
+        return
+    c1, c2 = st.columns(2)
+    attackers = sorted(att["jugador"].dropna().unique())
     with c1:
-        player = st.selectbox("Atacante", ["Todos"] + sorted(att["jugador"].dropna().unique()), key=f"{key}_player")
+        player = st.selectbox("Atacante", ["Selecciona atacante"] + attackers, key=f"{key}_player")
     with c2:
         zone = st.selectbox("Zona origen", ["Todas"] + sorted([z for z in att["origen"].dropna().unique() if z != "Sin zona"]), key=f"{key}_zone")
-    att = _filter_df(_filter_df(att, "jugador", player), "origen", zone)
+
+    view_for_zone = _filter_df(att, "origen", zone)
+    if player != "Selecciona atacante":
+        view_for_zone = view_for_zone[view_for_zone["jugador"] == player]
+
     st.markdown("#### Eficiencia de ataque por zona")
-    zg = att[att["origen"] != "Sin zona"].groupby("origen").agg(total=("skill_code","count"), kills=("es_punto","sum"), errores=("es_error","sum")).reset_index()
+    zg = view_for_zone[view_for_zone["origen"] != "Sin zona"].groupby("origen").agg(total=("skill_code","count"), kills=("es_punto","sum"), errores=("es_error","sum")).reset_index()
     if not zg.empty:
         zg["Eff%"] = ((zg["kills"]-zg["errores"])/zg["total"].replace(0,1)*100).round(1)
     eff_map = dict(zip(zg["origen"], zg["Eff%"].fillna(0).astype(int))) if not zg.empty else {}
     st.markdown(court_svg(eff_map, f"Eff% ataque · {team_label}", value_suffix="%"), unsafe_allow_html=True)
     pro_table(zg.sort_values("total", ascending=False) if not zg.empty else zg, height=320, caption='Detalle por zona de ataque')
+
     st.markdown("#### Direcciones de ataque")
+    if player == "Selecciona atacante":
+        direction_chart(pd.DataFrame(), "Direcciones de ataque · origen propio → destino rival", skill="A", empty_message="Selecciona un atacante para activar las flechas.")
+        st.caption("El campo queda en blanco hasta que selecciones un atacante. Así evitamos un mapa lleno de flechas mezcladas.")
+        return
+    att = _filter_df(view_for_zone, "jugador", player)
     dirs = att[(att["origen"]!="Sin zona") & (att["destino"]!="Sin zona")].groupby(["origen","destino"]).agg(total=("skill_code","count"), kills=("es_punto","sum"), errores=("es_error","sum")).reset_index()
-    if not dirs.empty: dirs["Eff%"] = ((dirs["kills"]-dirs["errores"])/dirs["total"].replace(0,1)*100).round(1)
-    direction_chart(dirs, "Direcciones de ataque · origen propio → destino rival", skill="A")
+    if not dirs.empty:
+        dirs["Eff%"] = ((dirs["kills"]-dirs["errores"])/dirs["total"].replace(0,1)*100).round(1)
+    direction_chart(dirs, f"Direcciones de ataque · {player}", skill="A")
     pro_table(dirs.sort_values("total", ascending=False) if not dirs.empty else dirs, height=360, caption='Detalle de direcciones')
+
 
 def render_serve_receive(data, key="sr"):
     df, team_label = filtered_context(data, key)
     sub = st.tabs(["Saque", "Recepción"])
     with sub[0]:
         srv = df[df["skill_code"] == "S"].copy()
-        if srv.empty: st.info("Sin saques"); return
-        c1,c2 = st.columns(2)
-        with c1: player = st.selectbox("Sacador", ["Todos"] + sorted(srv["jugador"].dropna().unique()), key=f"{key}_srv_player")
-        with c2: tipo = st.selectbox("Tipo de saque", ["Todos"] + sorted([x for x in srv["tipo"].dropna().unique() if x]), key=f"{key}_srv_type")
-        srv = _filter_df(_filter_df(srv, "jugador", player), "tipo", tipo)
-        dirs = srv[(srv["origen"]!="Sin zona") & (srv["destino"]!="Sin zona")].groupby(["origen","destino","tipo"]).agg(total=("skill_code","count"), aces=("es_punto","sum"), errores=("es_error","sum")).reset_index()
-        if not dirs.empty: dirs["Eff%"] = ((dirs["aces"]-dirs["errores"])/dirs["total"].replace(0,1)*100).round(1)
-        direction_chart(dirs, "Direcciones de saque · zona de origen → zona de recepción", skill="S")
-        pro_table(dirs.sort_values("total", ascending=False) if not dirs.empty else dirs, height=360, caption='Detalle de direcciones')
+        if srv.empty:
+            st.info("Sin saques")
+            direction_chart(pd.DataFrame(), "Direcciones de saque · campo limpio", skill="S")
+            return
+        c1, c2 = st.columns(2)
+        servers = sorted(srv["jugador"].dropna().unique())
+        with c1:
+            player = st.selectbox("Sacador", ["Selecciona sacador"] + servers, key=f"{key}_srv_player")
+        with c2:
+            tipo = st.selectbox("Tipo de saque", ["Todos"] + sorted([x for x in srv["tipo"].dropna().unique() if x]), key=f"{key}_srv_type")
+        srv = _filter_df(srv, "tipo", tipo)
+        if player == "Selecciona sacador":
+            direction_chart(pd.DataFrame(), "Direcciones de saque · zona de origen → zona de recepción", skill="S", empty_message="Selecciona un sacador para activar las flechas.")
+            st.caption("El mapa se mantiene limpio hasta elegir sacador.")
+        else:
+            srv = srv[srv["jugador"] == player]
+            dirs = srv[(srv["origen"]!="Sin zona") & (srv["destino"]!="Sin zona")].groupby(["origen","destino","tipo"]).agg(total=("skill_code","count"), aces=("es_punto","sum"), errores=("es_error","sum")).reset_index()
+            if not dirs.empty:
+                dirs["Eff%"] = ((dirs["aces"]-dirs["errores"])/dirs["total"].replace(0,1)*100).round(1)
+            direction_chart(dirs, f"Direcciones de saque · {player}", skill="S")
+            pro_table(dirs.sort_values("total", ascending=False) if not dirs.empty else dirs, height=360, caption='Detalle de direcciones')
     with sub[1]:
         rec = df[df["skill_code"] == "R"].copy()
-        if rec.empty: st.info("Sin recepciones"); return
+        if rec.empty:
+            st.info("Sin recepciones")
+            return
         receptor = st.selectbox("Receptor", ["Todos"] + sorted(rec["jugador"].dropna().unique()), key=f"{key}_rec_player")
         rec = _filter_df(rec, "jugador", receptor)
         zones = rec.groupby("origen").agg(total=("skill_code","count"), perfectas=("eval_code", lambda x: (x=="#").sum()), positivas=("eval_code", lambda x: x.isin(["#","+","!"]).sum()), errores=("eval_code", lambda x: (x=="=").sum())).reset_index()
-        zones["REC+%"] = ((zones["positivas"] / zones["total"].replace(0,1))*100).round(1)
-        zones["Perf%"] = ((zones["perfectas"] / zones["total"].replace(0,1))*100).round(1)
+        zones["#+!%"] = ((zones["positivas"] / zones["total"].replace(0,1))*100).round(1)
+        zones["#%"] = ((zones["perfectas"] / zones["total"].replace(0,1))*100).round(1)
         zones["Eff%"] = (((zones["positivas"]-zones["errores"]) / zones["total"].replace(0,1))*100).round(1)
         c1,c2,c3,c4 = st.columns(4)
         with c1: kpi("Recepciones", int(rec.shape[0]))
-        with c2: kpi("Errores", int((rec["eval_code"]=="=").sum()))
+        with c2: kpi("=", int((rec["eval_code"]=="=").sum()), "Errores")
         with c3: kpi("#+!%", f"{round(rec['eval_code'].isin(['#','+','!']).sum()/max(len(rec),1)*100,1)}%")
         with c4: kpi("#%", f"{round((rec['eval_code']=='#').sum()/max(len(rec),1)*100,1)}%")
         st.markdown(court_svg(dict(zip(zones["origen"], zones["Eff%"].fillna(0).astype(int))), f"Eficiencia recepción · {team_label}", value_suffix="%"), unsafe_allow_html=True)
         pro_table(zones.sort_values("total", ascending=False), height=340, caption='Zonas de recepción')
         st.markdown("#### Lectura por zona corporal")
-        st.caption("El DVW estándar no siempre guarda derecha/izquierda/medio/arriba/abajo. Dejo el módulo preparado: cuando el código del scout lo traiga, se podrá mapear aquí.")
+        st.caption("El DVW estándar no siempre guarda derecha/izquierda/medio/arriba/abajo. Módulo preparado para mapearlo cuando el código lo incluya.")
         body = pd.DataFrame({"Zona corporal":["Derecha","Izquierda","Medio","Arriba","Abajo"], "Recepciones detectadas":[0,0,0,0,0], "Nota":["Pendiente de mapeo DVW"]*5})
         pro_table(body, height=220, caption='Zona corporal de recepción')
 
@@ -624,7 +673,7 @@ def render_user_manual():
     st.markdown("""
     <div class='manual-card'>
       <h3>1. Carga y modo de análisis</h3>
-      <p>Sube uno o varios archivos <b>.dvw</b>. Si cargas un solo partido verás el análisis individual. Si cargas varios, puedes cambiar a <b>Acumulado multipartits</b> para estudiar tendencias de temporada o scouting de rival.</p>
+      <p>Sube uno o varios archivos <b>.dvw</b>. Si cargas un solo partido verás el análisis individual. Si cargas varios, puedes cambiar a <b>Acumulado multipartits</b> para estudiar tendencias de temporada, preparar scouting de rival y generar un match plan.</p>
     </div>
     <div class='manual-card'>
       <h3>2. Fases tácticas</h3>
@@ -640,7 +689,7 @@ def render_user_manual():
     </div>
     """, unsafe_allow_html=True)
     st.markdown("### Estructura recomendada")
-    st.info("Empieza por Resumen → Análisis Pro → Distribución. Después baja al detalle de ataque, saque/recepción y jugadores para confirmar las hipótesis.")
+    st.info("Empieza por Resumen → Match Plan → Distribución. Después baja al detalle de ataque, saque/recepción y jugadores para confirmar las hipótesis.")
 
 def _zone_matrix(df, zone_col, value_col):
     order = [["Z4","Z3","Z2"],["Z7","Z8","Z9"],["Z5","Z6","Z1"]]
@@ -722,34 +771,217 @@ def render_pro_analysis(data, key="pro"):
             z["Eff%"] = ((z["positivas"]-z["errores"])/z["total"].replace(0,1)*100).round(1)
             render_heatmap("Mapa de calor · Eff recepción", z, "origen", "Eff%")
 
+
+# ──────────────────────────────────────────────────────────────
+# MATCH PLAN AUTOMÁTICO
+# ──────────────────────────────────────────────────────────────
+def _apply_matchplan_filters(ctx: pd.DataFrame, team_code: str, fase: str, desde: int) -> pd.DataFrame:
+    df = ctx[ctx["equipo"] == team_code].copy()
+    df = _filter_df(df, "fase", fase)
+    score_col = "home_score" if team_code == "home" else "away_score"
+    if desde > 0 and score_col in df.columns:
+        df = df[pd.to_numeric(df[score_col], errors="coerce").fillna(0) >= desde]
+    return df
+
+
+def generate_match_plan(data: dict, team_label: str, fase: str = "Total", desde: int = 0) -> dict:
+    teams = {data["home_team"]["name"]:"home", data["away_team"]["name"]:"away"}
+    team_code = teams[team_label]
+    ctx = _plays_with_context(data)
+    df = _apply_matchplan_filters(ctx, team_code, fase, desde)
+    att = df[df["skill_code"] == "A"].copy()
+    rec = df[df["skill_code"] == "R"].copy()
+    srv = df[df["skill_code"] == "S"].copy()
+
+    plan = {"equipo": team_label, "fase": fase, "desde": desde, "acciones": [], "tablas": {}}
+
+    if not rec.empty:
+        rz = rec[rec["origen"] != "Sin zona"].groupby("origen").agg(
+            Total=("skill_code","count"),
+            **{"#": ("eval_code", lambda x:(x=="#").sum()),
+               "#+!": ("eval_code", lambda x:x.isin(["#","+","!"]).sum()),
+               "=": ("eval_code", lambda x:(x=="=").sum())}
+        ).reset_index()
+        rz["#+!%"] = (rz["#+!"] / rz["Total"].replace(0,1) * 100).round(1)
+        rz["=%"] = (rz["="] / rz["Total"].replace(0,1) * 100).round(1)
+        plan["tablas"]["recepcion_zonas"] = rz.sort_values(["=%","Total"], ascending=[False,False])
+        if not rz.empty:
+            worst = rz.sort_values(["=%","Total"], ascending=[False,False]).iloc[0]
+            plan["acciones"].append(("Plan de saque", f"Buscar recepción en {worst['origen']} si el rival/nuestro equipo muestra más error ahí.", f"{int(worst['Total'])} recepciones · = {worst['=%']}% · #+! {worst['#+!%']}%"))
+
+    if not att.empty:
+        az = att[att["origen"] != "Sin zona"].groupby("origen").agg(
+            Total=("skill_code","count"),
+            **{"#": ("eval_code", lambda x:(x=="#").sum()), "=": ("eval_code", lambda x:(x=="=").sum())}
+        ).reset_index()
+        az["Eff%"] = ((az["#"] - az["="]) / az["Total"].replace(0,1) * 100).round(1)
+        az["Distribución %"] = (az["Total"] / max(len(att),1) * 100).round(1)
+        plan["tablas"]["ataque_zonas"] = az.sort_values(["Eff%","Total"], ascending=[False,False])
+        if not az.empty:
+            best = az.sort_values(["Eff%","Total"], ascending=[False,False]).iloc[0]
+            load = az.sort_values(["Total"], ascending=False).iloc[0]
+            plan["acciones"].append(("Plan ofensivo", f"Priorizar {best['origen']} cuando haya recepción estable.", f"Eff {best['Eff%']}% · {int(best['Total'])} balones"))
+            if load["Distribución %"] > 40:
+                plan["acciones"].append(("Riesgo de previsibilidad", f"La salida {load['origen']} acumula mucho volumen.", f"Distribución {load['Distribución %']}%"))
+
+        neg = att[att["recepcion_eval"].isin(["-","/","="])]
+        if not neg.empty:
+            nz = neg.groupby("origen").agg(Total=("skill_code","count"), **{"#": ("eval_code", lambda x:(x=="#").sum()), "=": ("eval_code", lambda x:(x=="=").sum())}).reset_index()
+            nz["Eff%"] = ((nz["#"]-nz["="]) / nz["Total"].replace(0,1)*100).round(1)
+            plan["tablas"]["ataque_recepcion_negativa"] = nz.sort_values("Total", ascending=False)
+            topneg = nz.sort_values("Total", ascending=False).iloc[0]
+            plan["acciones"].append(("Recepción negativa", f"Con recepción -, / o = aparece más {topneg['origen']}.", f"{int(topneg['Total'])} balones · Eff {topneg['Eff%']}%"))
+
+    if not srv.empty:
+        sd = srv[(srv["origen"] != "Sin zona") & (srv["destino"] != "Sin zona")].groupby(["origen","destino"]).agg(
+            Total=("skill_code","count"), **{"#": ("eval_code", lambda x:(x=="#").sum()), "=": ("eval_code", lambda x:(x=="=").sum())}
+        ).reset_index()
+        sd["Eff%"] = ((sd["#"]-sd["="]) / sd["Total"].replace(0,1)*100).round(1)
+        plan["tablas"]["saque_direcciones"] = sd.sort_values(["Eff%","Total"], ascending=[False,False])
+        if not sd.empty:
+            bests = sd.sort_values(["Eff%","Total"], ascending=[False,False]).iloc[0]
+            plan["acciones"].append(("Dirección de saque", f"La ruta {bests['origen']} → {bests['destino']} es la más rentable con estos filtros.", f"Eff {bests['Eff%']}% · # {int(bests['#'])} · = {int(bests['='])}"))
+
+    if not df.empty:
+        rot = df.groupby("rotacion").agg(Acciones=("skill_code","count"), Puntos=("es_punto","sum"), **{"=": ("es_error","sum")}).reset_index()
+        rot["Balance"] = rot["Puntos"] - rot["="]
+        plan["tablas"]["rotaciones"] = rot.sort_values(["Balance","Acciones"], ascending=[True,False])
+        weak = rot.sort_values(["Balance","Acciones"], ascending=[True,False]).iloc[0]
+        plan["acciones"].append(("Rotación crítica", f"Revisar {weak['rotacion']} porque es la más débil por balance.", f"Balance {int(weak['Balance'])} · {int(weak['Acciones'])} acciones"))
+
+    if not plan["acciones"]:
+        plan["acciones"].append(("Sin patrón fuerte", "No hay suficiente muestra con estos filtros.", "Prueba Total o baja el punto de corte."))
+    return plan
+
+
+def render_match_plan(data, key="mp"):
+    st.markdown("### Match Plan automático")
+    st.caption("Genera un plan práctico a partir de los filtros: equipo, fase y punto de corte. Úsalo para preparar partido, timeout o revisión postpartido.")
+    teams = [data["home_team"]["name"], data["away_team"]["name"]]
+    c1,c2,c3 = st.columns([1.2,.8,.8])
+    with c1:
+        team_label = st.selectbox("Equipo base", teams, key=f"{key}_team")
+    with c2:
+        fase = st.selectbox("Fase", ["Total","K1","K2"], key=f"{key}_fase")
+    with c3:
+        desde = st.selectbox("Desde punto", list(range(0,31)), key=f"{key}_desde")
+    plan = generate_match_plan(data, team_label, fase, desde)
+    st.markdown(f"#### Plan para {plan['equipo']} · {plan['fase']} · desde punto {plan['desde']}")
+    cols = st.columns(2)
+    for i, (title, action, evidence) in enumerate(plan["acciones"][:6]):
+        with cols[i % 2]:
+            st.markdown(f"""
+            <div class='insight-card'>
+                <div class='label'>{title}</div>
+                <div style='font-size:1.05rem;font-weight:950;color:{P['text']};margin:.35rem 0'>{action}</div>
+                <div class='note'>{evidence}</div>
+            </div>
+            """, unsafe_allow_html=True)
+    st.markdown("---")
+    sub = st.tabs(["Ataque", "Recepción", "Saque", "Rotaciones"])
+    with sub[0]:
+        if "ataque_zonas" in plan["tablas"]: pro_table(plan["tablas"]["ataque_zonas"], height=340, caption="Zonas de ataque para construir el plan")
+        if "ataque_recepcion_negativa" in plan["tablas"]: pro_table(plan["tablas"]["ataque_recepcion_negativa"], height=260, caption="Salidas con recepción -, / o =")
+    with sub[1]:
+        if "recepcion_zonas" in plan["tablas"]: pro_table(plan["tablas"]["recepcion_zonas"], height=340, caption="Zonas de recepción ordenadas por riesgo")
+        else: st.info("Sin recepciones con estos filtros.")
+    with sub[2]:
+        if "saque_direcciones" in plan["tablas"]: pro_table(plan["tablas"]["saque_direcciones"], height=340, caption="Direcciones de saque más rentables")
+        else: st.info("Sin saques con estos filtros.")
+    with sub[3]:
+        if "rotaciones" in plan["tablas"]: pro_table(plan["tablas"]["rotaciones"], height=340, caption="Rotaciones con peor balance arriba")
+
 # ──────────────────────────────────────────────────────────────
 # EXPORTS
 # ──────────────────────────────────────────────────────────────
-def excel_bytes(data):
+def _sheet_safe(name: str) -> str:
+    return str(name)[:31].replace("/", "-").replace("\\", "-")
+
+
+def export_dataframes(data: dict, modules: list[str]) -> dict[str, pd.DataFrame]:
+    frames = {}
+    if "Resumen" in modules:
+        s = resumen_equipo(data)
+        frames["Resumen"] = pd.DataFrame([s["home"], s["away"]], index=[data["home_team"]["name"], data["away_team"]["name"]]).reset_index().rename(columns={"index":"Equipo"})
+    if "Jugadores" in modules:
+        frames["Jugadores"] = stats_por_jugador(data)
+    ctx = _plays_with_context(data)
+    if "Ataque" in modules and not ctx.empty:
+        att = ctx[ctx["skill_code"] == "A"].copy()
+        frames["Ataque zonas"] = att.groupby(["equipo","fase","rotacion","origen"]).agg(Total=("skill_code","count"), **{"#": ("eval_code", lambda x:(x=="#").sum()), "=": ("eval_code", lambda x:(x=="=").sum())}).reset_index() if not att.empty else pd.DataFrame()
+        frames["Ataque direcciones"] = att[(att["origen"]!="Sin zona")&(att["destino"]!="Sin zona")].groupby(["equipo","origen","destino"]).agg(Total=("skill_code","count"), **{"#": ("eval_code", lambda x:(x=="#").sum()), "=": ("eval_code", lambda x:(x=="=").sum())}).reset_index() if not att.empty else pd.DataFrame()
+    if "Saque" in modules and not ctx.empty:
+        srv = ctx[ctx["skill_code"] == "S"].copy()
+        frames["Saque direcciones"] = srv[(srv["origen"]!="Sin zona")&(srv["destino"]!="Sin zona")].groupby(["equipo","jugador","origen","destino","tipo"]).agg(Total=("skill_code","count"), **{"#": ("eval_code", lambda x:(x=="#").sum()), "=": ("eval_code", lambda x:(x=="=").sum())}).reset_index() if not srv.empty else pd.DataFrame()
+    if "Recepción" in modules and not ctx.empty:
+        rec = ctx[ctx["skill_code"] == "R"].copy()
+        frames["Recepción zonas"] = rec.groupby(["equipo","jugador","rotacion","origen"]).agg(Total=("skill_code","count"), **{"#": ("eval_code", lambda x:(x=="#").sum()), "#+!": ("eval_code", lambda x:x.isin(["#","+","!"]).sum()), "=": ("eval_code", lambda x:(x=="=").sum())}).reset_index() if not rec.empty else pd.DataFrame()
+    if "Distribución" in modules and not ctx.empty:
+        att = ctx[ctx["skill_code"] == "A"].copy()
+        if not att.empty:
+            att["zona_tactica"] = att["origen"].apply(_distribution_zone_group)
+            frames["Distribución"] = att.groupby(["equipo","fase","rotacion","colocador","recepcion_eval","recepcion_zona","zona_tactica"]).agg(Balones=("skill_code","count"), **{"#": ("eval_code", lambda x:(x=="#").sum()), "=": ("eval_code", lambda x:(x=="=").sum())}).reset_index()
+        else:
+            frames["Distribución"] = pd.DataFrame()
+    if "Match Plan" in modules:
+        plans = []
+        for team in [data["home_team"]["name"], data["away_team"]["name"]]:
+            plan = generate_match_plan(data, team, "Total", 0)
+            for title, action, evidence in plan["acciones"]:
+                plans.append({"Equipo": team, "Bloque": title, "Acción recomendada": action, "Evidencia": evidence})
+        frames["Match Plan"] = pd.DataFrame(plans)
+    if "Por Set" in modules:
+        plays = data.get("plays", pd.DataFrame())
+        frames["Por Set"] = plays.groupby(["set","equipo","skill"]).agg(Total=("skill","count"), Puntos=("es_punto","sum"), **{"=": ("es_error","sum")}).reset_index() if not plays.empty else pd.DataFrame()
+    if "Acciones crudas" in modules:
+        frames["Acciones"] = ctx
+    return frames
+
+
+def excel_bytes(data, modules=None):
+    modules = modules or ["Resumen", "Jugadores", "Acciones crudas"]
     output = BytesIO()
+    frames = export_dataframes(data, modules)
+    if not frames:
+        frames = {"Sin selección": pd.DataFrame({"Info": ["Selecciona al menos un módulo para exportar."]})}
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        pd.DataFrame([resumen_equipo(data)["home"], resumen_equipo(data)["away"]], index=[data["home_team"]["name"], data["away_team"]["name"]]).to_excel(writer, sheet_name="Tabellino")
-        stats_por_jugador(data).to_excel(writer, sheet_name="Jugadores", index=False)
-        _plays_with_context(data).to_excel(writer, sheet_name="Acciones", index=False)
+        for name, df in frames.items():
+            if df is None or df.empty:
+                pd.DataFrame({"Info":["Sin datos con esta selección"]}).to_excel(writer, sheet_name=_sheet_safe(name), index=False)
+            else:
+                format_table_labels(df).to_excel(writer, sheet_name=_sheet_safe(name), index=False)
     return output.getvalue()
 
-def pdf_bytes(data):
+
+def pdf_bytes(data, modules=None):
+    modules = modules or ["Resumen", "Jugadores", "Match Plan"]
     try:
         from reportlab.lib.pagesizes import A4
         from reportlab.lib import colors
-        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
         from reportlab.lib.styles import getSampleStyleSheet
     except Exception:
         return None
     buf = BytesIO(); doc = SimpleDocTemplate(buf, pagesize=A4); styles=getSampleStyleSheet(); story=[]
-    story.append(Paragraph("VolleyVision Hub · Resumen · creado por Marc Riverola Castellà", styles["Title"])); story.append(Spacer(1,12))
-    story.append(Paragraph(f"{data['home_team']['name']} vs {data['away_team']['name']}", styles["Heading2"]))
-    s=resumen_equipo(data); rows=[["Métrica", data['home_team']['name'], data['away_team']['name']]]
-    for label,key in [("Puntos","puntos"),("AT Eff%","att_eff"),("AT Kill%","att_kill_pct"),("REC+%","rec_pos_pct"),("Aces","srv_aces"),("Bloqueos","blk_kills")]: rows.append([label, s['home'].get(key,0), s['away'].get(key,0)])
-    t=Table(rows); t.setStyle(TableStyle([('BACKGROUND',(0,0),(-1,0),colors.lightgrey),('GRID',(0,0),(-1,-1),0.5,colors.grey)])); story.append(t); story.append(Spacer(1,12))
-    stp=stats_por_jugador(data).sort_values("Pts", ascending=False).head(12)
-    if not stp.empty:
-        story.append(Paragraph("Top jugadores", styles["Heading2"])); rows=[list(stp[["Equipo","Dorsal","Jugador","Pts","AT Eff%","REC%","BLQ K"]].columns)] + stp[["Equipo","Dorsal","Jugador","Pts","AT Eff%","REC%","BLQ K"]].values.tolist(); t=Table(rows); t.setStyle(TableStyle([('BACKGROUND',(0,0),(-1,0),colors.lightgrey),('GRID',(0,0),(-1,-1),0.4,colors.grey),('FONTSIZE',(0,0),(-1,-1),7)])); story.append(t)
+    story.append(Paragraph("VolleyVision Hub V2 · creado por Marc Riverola Castellà", styles["Title"])); story.append(Spacer(1,12))
+    story.append(Paragraph(f"{data['home_team']['name']} vs {data['away_team']['name']}", styles["Heading2"])); story.append(Spacer(1,10))
+    frames = export_dataframes(data, modules)
+    if not frames:
+        story.append(Paragraph("Selecciona al menos un módulo para exportar.", styles["Normal"]))
+    for name, df in frames.items():
+        if df is None or df.empty:
+            continue
+        story.append(Paragraph(name, styles["Heading2"]))
+        view = format_table_labels(df).head(18).fillna("")
+        rows = [list(view.columns)] + view.values.tolist()
+        t = Table(rows, repeatRows=1)
+        t.setStyle(TableStyle([
+            ('BACKGROUND',(0,0),(-1,0),colors.lightgrey),('GRID',(0,0),(-1,-1),0.35,colors.grey),
+            ('FONTSIZE',(0,0),(-1,-1),6),('VALIGN',(0,0),(-1,-1),'TOP')
+        ]))
+        story.append(t); story.append(Spacer(1,12))
+        if name in ("Jugadores", "Acciones"):
+            story.append(PageBreak())
     doc.build(story); return buf.getvalue()
 
 # ──────────────────────────────────────────────────────────────
@@ -757,6 +989,12 @@ def pdf_bytes(data):
 # ──────────────────────────────────────────────────────────────
 def view_landing():
     st.markdown('<div class="hero"><h1>Volley<span>Vision</span> Hub</h1><p>Scouting, táctica y análisis acumulado de voleibol</p></div>', unsafe_allow_html=True)
+
+    st.markdown("## Inicio / Manual")
+    render_user_manual()
+
+    st.markdown("---")
+    st.markdown("## Cargar partidos")
     files = st.file_uploader("Sube archivos DataVolley (.dvw)", type=["dvw"], accept_multiple_files=True)
     if files and st.button("Analizar partidos", type="primary", use_container_width=True):
         matches=[]; bar=st.progress(0)
@@ -771,14 +1009,14 @@ def view_landing():
 
 def render_single_match(data, prefix="single"):
     score_bar(data)
-    tabs = st.tabs(["Inicio / Manual", "Resumen", "Jugadores", "Análisis Pro", "Ataque", "Saque y Recepción", "Colocador / Distribución", "Por Set", "Exportar"])
+    tabs = st.tabs(["Inicio / Manual", "Resumen", "Jugadores", "Ataque", "Saque y Recepción", "Colocador / Distribución", "Match Plan", "Por Set", "Exportar"])
     with tabs[0]: render_user_manual()
     with tabs[1]: horizontal_mirror_comparison(data); tabellino(data); set_rotation_summary(data)
     with tabs[2]: render_players(data)
-    with tabs[3]: render_pro_analysis(data, key=f"{prefix}_pro")
-    with tabs[4]: render_attack(data, key=f"{prefix}_att")
-    with tabs[5]: render_serve_receive(data, key=f"{prefix}_sr")
-    with tabs[6]: render_distribution(data, key=f"{prefix}_dist")
+    with tabs[3]: render_attack(data, key=f"{prefix}_att")
+    with tabs[4]: render_serve_receive(data, key=f"{prefix}_sr")
+    with tabs[5]: render_distribution(data, key=f"{prefix}_dist")
+    with tabs[6]: render_match_plan(data, key=f"{prefix}_mp")
     with tabs[7]:
         plays=data.get("plays", pd.DataFrame())
         if plays.empty: st.info("Sin datos por set")
@@ -786,12 +1024,25 @@ def render_single_match(data, prefix="single"):
             sel=st.selectbox("Set", sorted(plays["set"].unique()), format_func=lambda x:f"Set {x}", key=f"{prefix}_set")
             for tc,nm in [("home",data["home_team"]["name"]),("away",data["away_team"]["name"] )]:
                 st.markdown(f"#### {nm}"); tp=plays[(plays["set"]==sel)&(plays["equipo"]==tc)&(plays["dorsal"]!=0)]
-                if not tp.empty: pro_table(tp.groupby("skill").agg(Total=("skill","count"), Puntos=("es_punto","sum"), Errores=("es_error","sum")).reset_index(), height=260, caption=f'Resumen por acción · {nm}')
+                if not tp.empty:
+                    pro_table(tp.groupby("skill").agg(Total=("skill","count"), Puntos=("es_punto","sum"), **{"=":("es_error","sum")}).reset_index(), height=260, caption=f'Resumen por acción · {nm}')
     with tabs[8]:
-        st.download_button("Descargar Excel completo", excel_bytes(data), file_name="VolleyVision_resumen.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.document")
-        pdf = pdf_bytes(data)
-        if pdf: st.download_button("Descargar PDF resumen", pdf, file_name="VolleyVision_resumen.pdf", mime="application/pdf")
-        else: st.warning("Para PDF añade reportlab en requirements.txt")
+        st.markdown("### Exportar informe")
+        st.caption("Selecciona qué módulos quieres incluir. El Excel crea una hoja por módulo y el PDF genera un resumen limpio para compartir.")
+        default_modules = ["Resumen", "Jugadores", "Ataque", "Saque", "Recepción", "Distribución", "Match Plan"]
+        export_modules = st.multiselect(
+            "Módulos a exportar",
+            ["Resumen", "Jugadores", "Ataque", "Saque", "Recepción", "Distribución", "Match Plan", "Por Set", "Acciones crudas"],
+            default=default_modules,
+            key=f"{prefix}_export_modules"
+        )
+        c1,c2 = st.columns(2)
+        with c1:
+            st.download_button("Descargar Excel seleccionado", excel_bytes(data, export_modules), file_name="VolleyVision_export_seleccionado.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.document", use_container_width=True)
+        with c2:
+            pdf = pdf_bytes(data, export_modules)
+            if pdf: st.download_button("Descargar PDF seleccionado", pdf, file_name="VolleyVision_export_seleccionado.pdf", mime="application/pdf", use_container_width=True)
+            else: st.warning("Para PDF añade reportlab en requirements.txt")
 
 def build_accumulated_match(matches, team_name):
     plays=[]; home_players=[]; away_players=[]
